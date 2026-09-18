@@ -435,18 +435,30 @@ mod tests {
             }
             assert!(count > 0, "agent must emit trickled candidates");
         }
-        let output = tokio::time::timeout(Duration::from_secs(20), async {
-            let mut output = String::new();
+        let mut output = String::new();
+        let output_result = tokio::time::timeout(Duration::from_secs(20), async {
+            let mut cursor_requests = 0;
             while let Some(bytes) = rx.recv().await {
                 output.push_str(&String::from_utf8_lossy(&bytes));
+                // Emulate the cursor-position reply sent by browser terminal emulators.
+                let requests = output.matches("\x1b[6n").count();
+                while cursor_requests < requests {
+                    channel
+                        .send(&bytes::Bytes::from_static(b"\x1b[1;1R"))
+                        .await
+                        .unwrap();
+                    cursor_requests += 1;
+                }
                 if output.contains("REMVORA_PTY_VERIFIED") {
-                    return output;
+                    return;
                 }
             }
-            output
         })
-        .await
-        .unwrap();
+        .await;
+        assert!(
+            output_result.is_ok(),
+            "Terminal timed out; output: {output:?}"
+        );
         assert!(output.contains("REMVORA_PTY_VERIFIED"));
         agent.close().await;
         client.close().await.unwrap();

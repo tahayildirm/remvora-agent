@@ -265,21 +265,30 @@ mod tests {
             "printf 'RELAY_%s\\n' OK\n"
         };
         peer.receive(&json!({"channel":"input","data":STANDARD.encode(command),"text":false,"part":0,"last":true})).await.unwrap();
-        let output = tokio::time::timeout(Duration::from_secs(5), async {
-            let mut output = String::new();
+        let mut output = String::new();
+        let output_result = tokio::time::timeout(Duration::from_secs(20), async {
+            let mut cursor_requests = 0;
             while let Some((session, packet)) = rx.recv().await {
                 assert_eq!(session, id);
                 output.push_str(&String::from_utf8_lossy(
                     &STANDARD.decode(packet["data"].as_str().unwrap()).unwrap(),
                 ));
+                // Emulate the cursor-position reply sent by browser terminal emulators.
+                let requests = output.matches("\x1b[6n").count();
+                while cursor_requests < requests {
+                    peer.receive(&json!({"channel":"input","data":STANDARD.encode("\x1b[1;1R"),"text":false,"part":0,"last":true})).await.unwrap();
+                    cursor_requests += 1;
+                }
                 if output.contains("RELAY_OK") {
                     break;
                 }
             }
-            output
         })
-        .await
-        .unwrap();
+        .await;
+        assert!(
+            output_result.is_ok(),
+            "Terminal timed out; output: {output:?}"
+        );
         assert!(output.contains("RELAY_OK"));
         assert!(
             peer.receive(
