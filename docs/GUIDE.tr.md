@@ -1,5 +1,6 @@
 # Remvora Agent — cihaz kurulum rehberi
 
+[Veritabanı ve ilk Owner kurulumu](https://github.com/tahayildirm/remvora-server/blob/main/docs/FIRST_INSTALL.tr.md)
 [Türkçe](GUIDE.tr.md) · [English](GUIDE.en.md)
 
 ## Cihazda ne çalışır?
@@ -58,7 +59,7 @@ Flag’ler `run` öncesine yazılır:
 
 | Flag | Etki ve sınır |
 |---|---|
-| `--allow-terminal` | Agent hesabı yetkilerinde gerçek shell/PTY; Unix `/bin/sh`, `--shell /absolute/path` ile seçilebilir |
+| `--allow-terminal` | Agent hesabı yetkilerinde gerçek shell/PTY; Unix üzerinde varsa `/bin/bash`, yoksa `/bin/sh`; `--shell /absolute/path` ile seçilebilir |
 | `--allow-desktop` | OS izni ve etkileşimli ekran koşuluyla görüntü ve klavye/fare |
 | `--allow-clipboard` | Açık eylemli metin panosu; desktop gerekir; 16 KiB |
 | `--file-root /absolute/shared` | Var olan korunan düz paylaşım klasörü; desktop gerekir, tüm diske erişim vermez |

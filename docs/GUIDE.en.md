@@ -1,5 +1,6 @@
 # Remvora Agent — device installation
 
+[Database and first Owner setup](https://github.com/tahayildirm/remvora-server/blob/main/docs/FIRST_INSTALL.en.md)
 [English](GUIDE.en.md) · [Türkçe](GUIDE.tr.md)
 
 ## What runs on a device?
@@ -58,7 +59,7 @@ Flags precede `run`:
 
 | Flag | Effect and boundary |
 |---|---|
-| `--allow-terminal` | Real shell/PTY under agent OS privileges; default Unix shell `/bin/sh`, configurable `--shell /absolute/path` |
+| `--allow-terminal` | Real shell/PTY under agent OS privileges; default Unix shell `/bin/bash` when available, otherwise `/bin/sh`, configurable `--shell /absolute/path` |
 | `--allow-desktop` | Screen capture and keyboard/mouse input, subject to OS permission and interactive display |
 | `--allow-clipboard` | Explicit text clipboard reads/writes only, requires desktop; 16 KiB text limit |
 | `--file-root /absolute/shared` | Existing protected flat shared directory, requires desktop; no arbitrary filesystem access |
