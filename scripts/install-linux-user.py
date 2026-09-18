@@ -15,8 +15,10 @@ p.add_argument('--ca-certificate',type=Path)
 p.add_argument('--file-root',type=Path)
 for flag in ['terminal','desktop','clipboard','audio','reboot']:
     p.add_argument('--allow-'+flag,action='store_true')
+p.add_argument('--allow-terminal-privilege-escalation',action='store_true',help='Allow server-authorized sudo/su; requires terminal and removes the service-wide NoNewPrivileges restriction')
 p.add_argument('--enable',action='store_true',help='Enable and start only after successful enrollment and activation')
 a=p.parse_args()
+if a.allow_terminal_privilege_escalation and not a.allow_terminal:p.error('Terminal privilege policy requires --allow-terminal')
 url=urlsplit(a.server)
 if url.scheme!='https' or not url.hostname or url.username or url.password or any(c.isspace() for c in a.server):p.error('A credential-free HTTPS server URL is required')
 if not a.binary.is_absolute() or not a.binary.is_file() or a.binary.is_symlink():p.error('Use an absolute regular executable path')
@@ -30,10 +32,12 @@ for flag,value in [('ca-certificate',a.ca_certificate),('file-root',a.file_root)
     if value:
         if not value.is_absolute() or value.is_symlink() or not value.exists():p.error('Local capability paths must exist and be absolute, without symlinks')
         command+=['--'+flag,str(value.resolve())]
+if a.allow_terminal_privilege_escalation:command+=['--allow-terminal-privilege-escalation']
 command+=['run']
 # systemd interprets percent specifiers even in quotes; double them in every external value.
 quote=lambda value:json.dumps(value).replace('%','%%')
 unit='[Unit]\nDescription=Remvora device agent (user session)\nAfter=graphical-session.target\n\n[Service]\nType=simple\nExecStart='+' '.join(map(quote,command))+'\nRestart=on-failure\nRestartSec=5\nNoNewPrivileges=true\nUMask=0077\n'
+if a.allow_terminal_privilege_escalation:unit=unit.replace('NoNewPrivileges=true','NoNewPrivileges=false')
 for key,default in [('DISPLAY',':0'),('WAYLAND_DISPLAY','wayland-0'),('XDG_SESSION_TYPE','wayland'),('XDG_RUNTIME_DIR',f'/run/user/{os.getuid()}'),('DBUS_SESSION_BUS_ADDRESS',f'unix:path=/run/user/{os.getuid()}/bus')]:
     value=os.environ.get(key,default)
     if '\n' in value or '\r' in value:p.error('Invalid session environment')

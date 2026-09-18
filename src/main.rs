@@ -33,6 +33,9 @@ struct Args {
     state: PathBuf,
     #[arg(long, default_value_t = false)]
     allow_terminal: bool,
+    /// Allow server-authorized Linux terminal sessions to use normal OS sudo/su rules.
+    #[arg(long, default_value_t = false, requires = "allow_terminal")]
+    allow_terminal_privilege_escalation: bool,
     #[arg(long, default_value_t = false)]
     allow_reboot: bool,
     #[arg(long, default_value_t = false)]
@@ -301,7 +304,7 @@ async fn connect(client: &reqwest::Client, args: &Args, identity: &Identity) -> 
     .await?;
     let mut heartbeat = tokio::time::interval(Duration::from_secs(20));
     let mut sessions: HashMap<Uuid, transport::RemotePeer> = HashMap::new();
-    let mut grants: HashMap<Uuid, String> = HashMap::new();
+    let mut grants: HashMap<Uuid, (String, bool)> = HashMap::new();
     let (relay_tx, mut relay_rx) = tokio::sync::mpsc::channel::<(Uuid, Value)>(32);
     let (ice_tx, mut ice_rx) = tokio::sync::mpsc::channel::<(Uuid, Value)>(128);
     let mut relays: HashMap<Uuid, relay::RelayPeer> = HashMap::new();
@@ -345,16 +348,18 @@ async fn connect(client: &reqwest::Client, args: &Args, identity: &Identity) -> 
                 match signal.kind.as_str() {
                     "session.request"=>{
                         let kind=signal.payload["kind"].as_str().unwrap_or("");
-                        let accepted=((kind=="Terminal" && args.allow_terminal)||(kind=="Desktop" && args.allow_desktop)) && grants.is_empty();
-                        if accepted {grants.insert(id,kind.into());}
-                        sink.send(Message::Text(serde_json::to_string(&Signal::new(if accepted{"session.accept"}else{"session.reject"},Some(id),json!({"trickleIce":accepted,"code":if accepted{"OK"}else if !grants.is_empty(){"SESSION_BUSY"}else{"CAPABILITY_UNAVAILABLE"}})))?.into())).await?;
+                        let elevation = kind == "Terminal" && signal.payload["allowTerminalPrivilegeEscalation"].as_bool().unwrap_or(false);
+                        let elevation_blocked = elevation && !terminal::elevation_available(args.allow_terminal_privilege_escalation);
+                        let accepted=!elevation_blocked && ((kind=="Terminal" && args.allow_terminal)||(kind=="Desktop" && args.allow_desktop)) && grants.is_empty();
+                        if accepted {grants.insert(id,(kind.into(),elevation));}
+                        sink.send(Message::Text(serde_json::to_string(&Signal::new(if accepted{"session.accept"}else{"session.reject"},Some(id),json!({"terminalPolicyVersion":1,"terminalPrivilegeEscalation":elevation,"trickleIce":accepted,"code":if accepted{"OK"}else if elevation_blocked{"TERMINAL_ELEVATION_UNAVAILABLE"}else if !grants.is_empty(){"SESSION_BUSY"}else{"CAPABILITY_UNAVAILABLE"}})))?.into())).await?;
                     }
                     "webrtc.offer"=>{
                         ensure!(grants.contains_key(&id) && !sessions.contains_key(&id),"Unauthorized offer");
                         let sdp=signal.payload["sdp"].as_str().ok_or_else(||anyhow::anyhow!("Missing SDP"))?;
                         let shell=args.shell.clone().unwrap_or_else(terminal::default_shell);
                         ensure!(shell.is_absolute(),"Shell path must be absolute");
-                        match transport::RemotePeer::answer(sdp,shell,grants.get(&id).is_some_and(|x|x=="Desktop"),transport::DesktopOptions{clipboard:args.allow_clipboard,monitor_id:args.monitor_id,file_root:args.file_root.clone(),audio:args.allow_audio,state:args.state.clone()},Some((id,ice_tx.clone()))).await {
+                        match transport::RemotePeer::answer(sdp,shell,grants.get(&id).is_some_and(|x|x.0=="Desktop"),transport::DesktopOptions{terminal_elevation:grants.get(&id).is_some_and(|x|x.1),clipboard:args.allow_clipboard,monitor_id:args.monitor_id,file_root:args.file_root.clone(),audio:args.allow_audio,state:args.state.clone()},Some((id,ice_tx.clone()))).await {
                             Ok((peer,answer)) => {
                                 sessions.insert(id,peer);
                                 sink.send(Message::Text(serde_json::to_string(&Signal::new("webrtc.answer",Some(id),json!({"sdp":answer,"type":"answer"})))?.into())).await?;
@@ -376,7 +381,7 @@ async fn connect(client: &reqwest::Client, args: &Args, identity: &Identity) -> 
                         if let Some(peer)=sessions.remove(&id){peer.close().await;}
                         ensure!(!relays.contains_key(&id),"Relay already active");
                         let shell=args.shell.clone().unwrap_or_else(terminal::default_shell);
-                        let peer=relay::RelayPeer::start(id,relay_tx.clone(),shell,grants.get(&id).is_some_and(|x|x=="Desktop"),transport::DesktopOptions{clipboard:args.allow_clipboard,monitor_id:args.monitor_id,file_root:args.file_root.clone(),audio:args.allow_audio,state:args.state.clone()}).await?;
+                        let peer=relay::RelayPeer::start(id,relay_tx.clone(),shell,grants.get(&id).is_some_and(|x|x.0=="Desktop"),transport::DesktopOptions{terminal_elevation:grants.get(&id).is_some_and(|x|x.1),clipboard:args.allow_clipboard,monitor_id:args.monitor_id,file_root:args.file_root.clone(),audio:args.allow_audio,state:args.state.clone()}).await?;
                         relays.insert(id,peer);
                         sink.send(Message::Text(serde_json::to_string(&Signal::new("relay.ready",Some(id),json!({})))?.into())).await?;
                     },

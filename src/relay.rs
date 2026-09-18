@@ -189,7 +189,7 @@ impl RelayPeer {
                 );
             }
         } else {
-            crate::terminal::start(input, shell, killer)?;
+            crate::terminal::start(input, shell, killer, options.terminal_elevation)?;
         }
         Ok(peer)
     }
@@ -251,6 +251,7 @@ mod tests {
             false,
             crate::transport::DesktopOptions {
                 clipboard: false,
+                terminal_elevation: false,
                 monitor_id: None,
                 file_root: None,
                 audio: false,

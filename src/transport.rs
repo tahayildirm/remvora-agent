@@ -19,6 +19,7 @@ use webrtc::{
 
 pub struct DesktopOptions {
     pub clipboard: bool,
+    pub terminal_elevation: bool,
     pub monitor_id: Option<u32>,
     pub file_root: Option<PathBuf>,
     pub audio: bool,
@@ -42,6 +43,7 @@ impl RemotePeer {
     ) -> Result<(Self, String)> {
         let DesktopOptions {
             clipboard,
+            terminal_elevation,
             monitor_id,
             file_root,
             audio,
@@ -232,7 +234,7 @@ impl RemotePeer {
                 }));
                 channel.on_open(Box::new(move || {
                     Box::pin(async move {
-                        if terminal::start(crate::relay::Channel::rtc(open.clone()), shell, killer).is_err() {
+                        if terminal::start(crate::relay::Channel::rtc(open.clone()), shell, killer, terminal_elevation).is_err() {
                             let _ = open.close().await;
                         }
                     })
@@ -396,6 +398,7 @@ mod tests {
             false,
             DesktopOptions {
                 clipboard: false,
+                terminal_elevation: false,
                 monitor_id: None,
                 file_root: None,
                 audio: false,

@@ -114,3 +114,11 @@ Sorun kontrolü: çevrimdışı → servis/WSS/TLS/state; siyah ekran → login/
 ## Lisans ve yayın sınırları
 
 MIT özgün Remvora koduna uygulanır; bağımlılıkların topluca yeniden lisanslanması değildir. OpenH264, Opus, xcap, Enigo ve diğer bildirimleri koruyun. Tam SBOM/lisans incelemesi, native platform testleri, uzun süreli güvenilirlik/güvenlik ve imza/notarizasyon genel binary yayınının açık koşullarıdır. [Durum](STATUS.md), [yayın kontrolü](PUBLIC_RELEASE.md), SECURITY ve CONTRIBUTING’i okuyun. Hosting/destek maliyeti ve garantili SLA dahil değildir.
+
+## Linux: panelden yönetilen terminal sudo/su izni (0.3.7+)
+
+Varsayılan kapalıdır. Sunucu cihaz politikası ile oturumu açan kullanıcının `devices.terminalElevation` izni birlikte gerekir. Yerelde `--allow-terminal-privilege-escalation` seçilmemişse veya servis hâlâ `NoNewPrivileges=true` taşıyorsa izinli terminal isteği `TERMINAL_ELEVATION_UNAVAILABLE` ile reddedilir. Normal terminal oturumları Linux'ta `setpriv --no-new-privs` üzerinden açılır; util-linux paketindeki `/usr/bin/setpriv` veya `/bin/setpriv` gereklidir. Araç yoksa kısıtlamasız kabuğa düşülmez.
+
+Yeni kurulum: `scripts/install-linux-user.py` komutuna mevcut seçeneklere ek olarak `--allow-terminal --allow-terminal-privilege-escalation` verin. Bu açık seçim servis düzeyindeki NoNewPrivileges kısıtlamasını kaldırır; terminal başına sunucu politikası geçerli olur. Mevcut kurulumda önce 0.3.7+ binary'ye geçin, Remvora servisinin ExecStart satırına `--allow-terminal-privilege-escalation` ekleyin ve `NoNewPrivileges=false` yapın; yalnız Remvora servisi için daemon-reload/restart uygulayın. Kimlik dizinini ve diğer servis ayarlarını koruyun. Sistem servisindeki diğer sandbox kısıtları sudo'yu hâlâ engelleyebilir.
+
+Güncelleme sırası: agent → bir defalık yerel servis izni → API migration/yayın → Web. Yeni API eski agentlerin terminal politika onayını eksik gördüğünde oturumu reddeder. Panelde cihaz ayarı kapalı kaldığı sürece sudo/su engellidir; açıldığında da normal Linux parolası ve sudoers kuralları aranır. Bu, root veya parolasız sudo verme işlemi değildir. Politika değişikliği yeni oturumla uygulanır; önceden başlatılmış ayrıcalıklı süreçleri veya dosya değişikliklerini geri almaz.

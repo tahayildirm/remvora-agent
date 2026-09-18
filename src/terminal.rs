@@ -20,16 +20,54 @@ pub fn default_shell() -> PathBuf {
     }
 }
 
+/// The device must explicitly opt in and the inherited service restriction must be absent.
+pub fn elevation_available(local_opt_in: bool) -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        local_opt_in && unsafe { libc::prctl(libc::PR_GET_NO_NEW_PRIVS, 0, 0, 0, 0) } == 0
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = local_opt_in;
+        false
+    }
+}
+
+fn shell_command(shell: &std::path::Path, allow_elevation: bool) -> Result<CommandBuilder> {
+    #[cfg(target_os = "linux")]
+    if !allow_elevation {
+        // Restrict only this shell. The parent agent remains able to start a later authorized shell.
+        let helper = ["/usr/bin/setpriv", "/bin/setpriv"]
+            .into_iter()
+            .find(|path| std::path::Path::new(path).is_file())
+            .ok_or_else(|| {
+                anyhow::anyhow!("util-linux setpriv is required for restricted terminals")
+            })?;
+        let mut command = CommandBuilder::new(helper);
+        command.arg("--no-new-privs");
+        command.arg("--");
+        command.arg(shell);
+        return Ok(command);
+    }
+    let _ = allow_elevation;
+    Ok(CommandBuilder::new(shell))
+}
+
 pub type Killer = Arc<Mutex<Option<Box<dyn ChildKiller + Send + Sync>>>>;
 /// Spawn an interactive OS shell directly, never by concatenating a command supplied in signaling.
-pub fn start(channel: Arc<RTCDataChannel>, shell: PathBuf, killer: Killer) -> Result<()> {
+pub fn start(
+    channel: Arc<RTCDataChannel>,
+    shell: PathBuf,
+    killer: Killer,
+    allow_elevation: bool,
+) -> Result<()> {
     let pair = native_pty_system().openpty(PtySize {
         rows: 24,
         cols: 80,
         pixel_width: 0,
         pixel_height: 0,
     })?;
-    let mut command = CommandBuilder::new(&shell);
+    let mut command = shell_command(&shell, allow_elevation)?;
     if !cfg!(windows) {
         match shell.file_name().and_then(|name| name.to_str()) {
             Some("bash") => {
@@ -134,5 +172,37 @@ pub fn test_input(output: &str, command: &str) -> Vec<u8> {
         .into_bytes()
     } else {
         command.as_bytes().to_vec()
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod policy_tests {
+    use super::*;
+    #[test]
+    fn restricted_shell_sets_no_new_privileges() {
+        let pair = native_pty_system()
+            .openpty(PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .unwrap();
+        let mut command = shell_command(std::path::Path::new("/bin/sh"), false).unwrap();
+        command.arg("-c");
+        command.arg("grep NoNewPrivs /proc/self/status");
+        let mut child = pair.slave.spawn_command(command).unwrap();
+        drop(pair.slave);
+        let mut reader = pair.master.try_clone_reader().unwrap();
+        let mut output = Vec::new();
+        let _ = reader.read_to_end(&mut output);
+        child.wait().unwrap();
+        let text = String::from_utf8_lossy(&output);
+        assert!(text.contains("NoNewPrivs:"), "{text}");
+        assert!(text.split_whitespace().any(|part| part == "1"), "{text}");
+    }
+    #[test]
+    fn elevation_requires_local_opt_in() {
+        assert!(!elevation_available(false));
     }
 }

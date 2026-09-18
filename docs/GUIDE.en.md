@@ -114,3 +114,11 @@ Troubleshooting: offline → service/WSS/TLS/state; black desktop → login sess
 ## License and release limits
 
 MIT applies to Remvora’s original source, not a blanket relicensing of dependencies. Preserve OpenH264, Opus, xcap, Enigo and other upstream notices. Complete license/SBOM review, native platform tests, long-duration reliability/security review and code-signing/notarization remain public binary release gates. Read [status](STATUS.md), [release checklist](PUBLIC_RELEASE.md), SECURITY and CONTRIBUTING. Hosting/support costs and guaranteed service levels are not included.
+
+## Linux: panel-managed terminal sudo/su permission (0.3.7+)
+
+Off by default. Both the server's device policy and the operator's `devices.terminalElevation` permission are required. Without local `--allow-terminal-privilege-escalation`, or while service `NoNewPrivileges=true` remains inherited, an elevation-enabled request fails with `TERMINAL_ELEVATION_UNAVAILABLE`. Ordinary Linux terminal sessions run through `setpriv --no-new-privs`; install util-linux providing `/usr/bin/setpriv` or `/bin/setpriv`. Missing helpers never fall back to an unrestricted shell.
+
+New installation: add `--allow-terminal --allow-terminal-privilege-escalation` to the existing `scripts/install-linux-user.py` options. This explicit choice removes service-wide NoNewPrivileges while preserving per-terminal policy. Existing installation: update the binary to 0.3.7+, add `--allow-terminal-privilege-escalation` to the Remvora unit's ExecStart and set `NoNewPrivileges=false`; daemon-reload/restart only Remvora. Preserve identity and other service settings. Additional system-service sandbox options may still prevent sudo.
+
+Upgrade order: agent → one-time local service opt-in → API migration/deployment → Web. The new API rejects old agents lacking terminal policy acknowledgement. While the device policy stays off, sudo/su remain blocked; enabling it still requires normal Linux passwords/sudoers authorization. It grants neither root nor passwordless sudo. Changes apply through new sessions and cannot undo previously started privileged processes or filesystem changes.
