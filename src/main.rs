@@ -4,6 +4,7 @@ mod files;
 mod identity;
 mod protocol;
 mod reboot;
+mod reconnect;
 mod relay;
 #[cfg(windows)]
 mod service;
@@ -205,17 +206,16 @@ async fn run(args: Args) -> Result<()> {
             tracing::info!("Device activated");
         }
         Command::Run => {
-            let mut attempt = 0u32;
+            let mut retry = reconnect::Retry::default();
             loop {
                 tokio::select! {
-                    result=connect(&client,&args,&identity) => {
+                    result=connect(&client,&args,&identity,&mut retry) => {
                         if result.is_err() { tracing::warn!("Control connection ended; retrying with backoff"); }
                     }
                     _=shutdown()=>break,
                 }
-                attempt = (attempt + 1).min(6);
-                let jitter = u64::from(rand_core::RngCore::next_u32(&mut rand_core::OsRng) % 1000);
-                tokio::select! {_=tokio::time::sleep(Duration::from_millis((1u64<<attempt)*1000+jitter))=>{},_=shutdown()=>break}
+                let jitter = u64::from(rand_core::RngCore::next_u32(&mut rand_core::OsRng) % 250);
+                tokio::select! {_=tokio::time::sleep(retry.next_delay(jitter))=>{},_=shutdown()=>break}
             }
         }
     }
@@ -255,7 +255,12 @@ async fn proof(
     );
     Ok(json!({"challengeId":challenge["challengeId"],"signature":identity.sign(text)}))
 }
-async fn connect(client: &reqwest::Client, args: &Args, identity: &Identity) -> Result<()> {
+async fn connect(
+    client: &reqwest::Client,
+    args: &Args,
+    identity: &Identity,
+    retry: &mut reconnect::Retry,
+) -> Result<()> {
     let proof = proof(client, args, identity, "connect").await?;
     let mut url = args.server.join("ws/agent")?;
     url.set_scheme(if args.server.scheme() == "https" {
@@ -334,7 +339,7 @@ async fn connect(client: &reqwest::Client, args: &Args, identity: &Identity) -> 
                 ensure!(text.len()<=65536,"Signal too large");let signal:Signal=serde_json::from_str(&text)?;ensure!(signal.protocol_version==1,"Unsupported protocol");
                 let sent=chrono::DateTime::parse_from_rfc3339(&signal.timestamp)?;
                 ensure!((chrono::Utc::now()-sent.with_timezone(&chrono::Utc)).num_seconds().abs()<=120,"Stale signal");
-                if signal.kind=="agent.connected" {tracing::info!("Authenticated control connection established");continue;}
+                if signal.kind=="agent.connected" {retry.connected();tracing::info!("Authenticated control connection established");continue;}
                 if signal.kind == "device.reboot" && signal.session_id.is_none() {
                     let command_id: Uuid = serde_json::from_value(signal.payload["commandId"].clone())?;
                     let expires = chrono::DateTime::parse_from_rfc3339(signal.payload["expiresAt"].as_str().ok_or_else(||anyhow::anyhow!("Missing command expiry"))?)?;
