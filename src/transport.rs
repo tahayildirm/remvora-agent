@@ -351,6 +351,9 @@ mod tests {
         let input = channel.clone();
         channel.on_open(Box::new(move || {
             Box::pin(async move {
+                if cfg!(windows) {
+                    return;
+                }
                 let _ = input
                     .send(&bytes::Bytes::from_static(if cfg!(windows) {
                         b"Write-Output ('REMVORA_PTY_' + 'VERIFIED')\r"
@@ -438,6 +441,7 @@ mod tests {
         let mut output = String::new();
         let output_result = tokio::time::timeout(Duration::from_secs(20), async {
             let mut cursor_requests = 0;
+            let mut command_sent = !cfg!(windows);
             while let Some(bytes) = rx.recv().await {
                 output.push_str(&String::from_utf8_lossy(&bytes));
                 // Emulate the cursor-position reply sent by browser terminal emulators.
@@ -448,6 +452,15 @@ mod tests {
                         .await
                         .unwrap();
                     cursor_requests += 1;
+                }
+                if !command_sent && output.contains("> ") {
+                    channel
+                        .send(&bytes::Bytes::from_static(
+                            b"Write-Output ('REMVORA_PTY_' + 'VERIFIED')\r",
+                        ))
+                        .await
+                        .unwrap();
+                    command_sent = true;
                 }
                 if output.contains("REMVORA_PTY_VERIFIED") {
                     return;

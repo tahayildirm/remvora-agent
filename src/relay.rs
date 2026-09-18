@@ -264,10 +264,13 @@ mod tests {
         } else {
             "printf 'RELAY_%s\\n' OK\n"
         };
-        peer.receive(&json!({"channel":"input","data":STANDARD.encode(command),"text":false,"part":0,"last":true})).await.unwrap();
+        if !cfg!(windows) {
+            peer.receive(&json!({"channel":"input","data":STANDARD.encode(command),"text":false,"part":0,"last":true})).await.unwrap();
+        }
         let mut output = String::new();
         let output_result = tokio::time::timeout(Duration::from_secs(20), async {
             let mut cursor_requests = 0;
+            let mut command_sent = !cfg!(windows);
             while let Some((session, packet)) = rx.recv().await {
                 assert_eq!(session, id);
                 output.push_str(&String::from_utf8_lossy(
@@ -278,6 +281,10 @@ mod tests {
                 while cursor_requests < requests {
                     peer.receive(&json!({"channel":"input","data":STANDARD.encode("\x1b[1;1R"),"text":false,"part":0,"last":true})).await.unwrap();
                     cursor_requests += 1;
+                }
+                if !command_sent && output.contains("> ") {
+                    peer.receive(&json!({"channel":"input","data":STANDARD.encode(command),"text":false,"part":0,"last":true})).await.unwrap();
+                    command_sent = true;
                 }
                 if output.contains("RELAY_OK") {
                     break;
