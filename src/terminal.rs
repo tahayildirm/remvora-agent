@@ -32,8 +32,14 @@ pub fn start(channel: Arc<RTCDataChannel>, shell: PathBuf, killer: Killer) -> Re
     let mut command = CommandBuilder::new(&shell);
     if !cfg!(windows) {
         match shell.file_name().and_then(|name| name.to_str()) {
-            Some("bash") => { command.arg("-i"); command.env("PS1", r"\u@\h:\w\$ "); }
-            Some("sh" | "dash" | "ash") => { command.arg("-i"); command.env("PS1", "${PWD} $ "); }
+            Some("bash") => {
+                command.arg("-i");
+                command.env("PS1", r"\u@\h:\w\$ ");
+            }
+            Some("sh" | "dash" | "ash") => {
+                command.arg("-i");
+                command.env("PS1", "${PWD} $ ");
+            }
             _ => {}
         }
     }
