@@ -9,6 +9,7 @@ mod relay;
 #[cfg(windows)]
 mod service;
 mod terminal;
+mod text_focus;
 mod transport;
 mod updater;
 mod video_resize;

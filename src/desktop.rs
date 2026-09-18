@@ -368,9 +368,33 @@ pub fn input(
                     None
                 },
             };
+            let focus_busy = Arc::new(AtomicBool::new(false));
+            let mut last_focus_query = std::time::Instant::now() - Duration::from_secs(1);
             while !stop.load(Ordering::Relaxed) {
                 match rx.try_recv() {
                     Ok(command) => {
+                        if matches!(command.kind.as_str(), "text.focus" | "text.regions") {
+                            if last_focus_query.elapsed() >= Duration::from_millis(300)
+                                && !focus_busy.swap(true, Ordering::Relaxed)
+                            {
+                                last_focus_query = std::time::Instant::now();
+                                let busy = focus_busy.clone();
+                                let channel = channel.clone();
+                                let stop = stop.clone();
+                                let (x, y, w, h) = (input.x, input.y, input.width, input.height);
+                                let nonce = command.nonce;
+                                let regions = command.kind == "text.regions";
+                                runtime.spawn(async move {
+                                    tokio::time::sleep(Duration::from_millis(100)).await;
+                                    let bounds = crate::text_focus::query(x,y,w,h,regions).await;
+                                    if !stop.load(Ordering::Relaxed) {
+                                        let _ = tokio::time::timeout(Duration::from_secs(1), channel.send_text(serde_json::json!({"type":if regions {"text.regions"} else {"text.focus"},"nonce":nonce,"bounds":if regions {serde_json::json!(bounds)} else {serde_json::json!(bounds.first())}}).to_string())).await;
+                                    }
+                                    busy.store(false, Ordering::Relaxed);
+                                });
+                            }
+                            continue;
+                        }
                         if command.kind == "video.configure" {
                             if let (Some(fps), Some(bitrate), Some(width)) =
                                 (command.fps, command.bitrate, command.width)
