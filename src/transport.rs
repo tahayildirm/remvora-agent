@@ -77,6 +77,7 @@ impl RemotePeer {
                 .new_peer_connection(configuration)
                 .await?,
         );
+        let trickle_ice = candidates.is_some();
         if let Some((session, output)) = candidates {
             connection.on_ice_candidate(Box::new(move |candidate| {
                 let output = output.clone();
@@ -250,9 +251,12 @@ impl RemotePeer {
             let answer = connection.create_answer(None).await?;
             let mut gathering = connection.gathering_complete_promise().await;
             connection.set_local_description(answer).await?;
-            if tokio::time::timeout(Duration::from_secs(6), gathering.recv())
-                .await
-                .is_err()
+            // Trickle candidates are sent on the control loop after this returns.
+            // Waiting here delays both the answer and those queued candidates.
+            if !trickle_ice
+                && tokio::time::timeout(Duration::from_secs(6), gathering.recv())
+                    .await
+                    .is_err()
             {
                 tracing::warn!(
                     "ICE gathering deadline reached; answering with available candidates"
@@ -431,14 +435,25 @@ mod tests {
             {
                 agent.add_candidate(serde_json::json!({"candidate":format!("candidate:{candidate}"),"sdpMid":"0","sdpMLineIndex":0})).await.unwrap();
             }
-            let mut count = 0;
-            while let Ok((_, candidate)) = candidate_rx.try_recv() {
-                client
-                    .add_ice_candidate(serde_json::from_value(candidate).unwrap())
-                    .await
-                    .unwrap();
-                count += 1;
-            }
+            // The answer now returns before gathering completes; consume truly late
+            // candidates until the end marker instead of assuming they are queued.
+            let count = tokio::time::timeout(Duration::from_secs(10), async {
+                let mut count = 0;
+                while let Some((_, candidate)) = candidate_rx.recv().await {
+                    let complete = candidate["candidate"].as_str() == Some("");
+                    client
+                        .add_ice_candidate(serde_json::from_value(candidate).unwrap())
+                        .await
+                        .unwrap();
+                    if complete {
+                        break;
+                    }
+                    count += 1;
+                }
+                count
+            })
+            .await
+            .unwrap();
             assert!(count > 0, "agent must emit trickled candidates");
         }
         let mut output = String::new();
