@@ -15,3 +15,11 @@ The web validates nonce, age and bounds, and only tries to focus its native keyb
 TR: Bu özellik deneysel; gerçek cihaz kabul testleri tamamlanmadı. Yalnızca alanın konumu aktarılır, yazı/parola içeriği okunmaz. Erişilebilirlik sağlamayan uygulamalarda ve macOS'ta klavye düğmesi kullanılır. iPhone'un asenkron odaklama kısıtlaması nedeniyle otomatik açılma garantisi yoktur. Windows servisinden kullanıcı masaüstüne erişim bu özellik tarafından çözülmez.
 
 Providers returning invalid/unsupported screen coordinates are rejected, including GTK providers reporting (0,0) for an offset control. GTK3/X11 coordinates were verified on the Raspberry; this does not establish support for every native Wayland application.
+
+## Raspberry Pi OS: empty accessibility tree
+
+If the helper returns `[]`, check `gsettings get org.gnome.desktop.interface toolkit-accessibility`, `org.a11y.Status.IsEnabled` on the session bus, and the target application's `NO_AT_BRIDGE` environment variable. Raspberry Pi OS may set `NO_AT_BRIDGE=1` in `/etc/profile.d/at-dbus-fix.sh` when the accessibility bus package was absent at login. Installing the package does not change the environment of already-running applications. Enable toolkit accessibility and reopen the application without that flag, or sign out and back in after installation. Do not terminate an existing terminal with unsaved work.
+
+TR: Raspberry Pi OS, erişilebilirlik paketi kurulmadan önce açılmış uygulamalara `NO_AT_BRIDGE=1` aktarabiliyor. Paket kurulsa bile açık uygulama bu değeri koruyor. Erişilebilirliği etkinleştirip uygulamayı bu değişken olmadan yeniden açın; mevcut işi olan terminali kapatmayın. Kurulum sonrası yeni masaüstü oturumu da eski ortam değişkenini temizler.
+
+On the Raspberry, enabling accessibility and opening LXTerminal with `NO_AT_BRIDGE=0 GDK_BACKEND=x11` produced valid terminal bounds in approximately 160–170 ms. A tap on that terminal in the live mobile layout focused the invisible keyboard sink; typing appeared in the remote terminal without a separate text box. This desktop-browser test does not verify the physical iOS/Android keyboard.
