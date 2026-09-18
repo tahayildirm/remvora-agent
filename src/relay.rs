@@ -283,7 +283,7 @@ mod tests {
                     cursor_requests += 1;
                 }
                 if !command_sent && output.contains("> ") {
-                    peer.receive(&json!({"channel":"input","data":STANDARD.encode(command),"text":false,"part":0,"last":true})).await.unwrap();
+                    peer.receive(&json!({"channel":"input","data":STANDARD.encode(crate::terminal::test_input(&output, command)),"text":false,"part":0,"last":true})).await.unwrap();
                     command_sent = true;
                 }
                 if output.contains("RELAY_OK") {

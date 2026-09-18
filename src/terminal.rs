@@ -121,3 +121,18 @@ pub fn start(channel: Arc<RTCDataChannel>, shell: PathBuf, killer: Killer) -> Re
     });
     Ok(())
 }
+
+#[cfg(test)]
+pub fn test_input(output: &str, command: &str) -> Vec<u8> {
+    // ConPTY may request Win32 key records. A bare CR then lacks VK_RETURN.
+    // https://github.com/microsoft/terminal/blob/main/src/terminal/input/terminalInput.cpp
+    if output.contains("\x1b[?9001h") {
+        format!(
+            "{}\x1b[13;28;13;1;0;1_\x1b[13;28;13;0;0;1_",
+            command.trim_end_matches('\r')
+        )
+        .into_bytes()
+    } else {
+        command.as_bytes().to_vec()
+    }
+}

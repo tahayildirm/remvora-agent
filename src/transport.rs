@@ -455,9 +455,10 @@ mod tests {
                 }
                 if !command_sent && output.contains("> ") {
                     channel
-                        .send(&bytes::Bytes::from_static(
-                            b"Write-Output ('REMVORA_PTY_' + 'VERIFIED')\r",
-                        ))
+                        .send(&bytes::Bytes::from(crate::terminal::test_input(
+                            &output,
+                            "Write-Output ('REMVORA_PTY_' + 'VERIFIED')\r",
+                        )))
                         .await
                         .unwrap();
                     command_sent = true;
