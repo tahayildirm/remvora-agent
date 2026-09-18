@@ -1,0 +1,23 @@
+[Unit]
+Description=Remvora device agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=remvora
+Group=remvora
+StateDirectory=remvora
+UMask=0077
+ExecStart=/opt/remvora/remvora-agent --server https://remvora.example/ --state /var/lib/remvora --allow-terminal run
+Restart=on-failure
+RestartSec=5
+KillMode=control-group
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/remvora
+
+[Install]
+WantedBy=multi-user.target

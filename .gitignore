@@ -1,0 +1,29 @@
+/target/
+.runtime/
+*.key
+.env
+.DS_Store
+.tools/
+.artifacts/
+
+__pycache__/
+
+# Private deployment material is not part of the public source release.
+.backups/
+.env.*
+!.env.example
+**/appsettings.Production.json
+*.pfx
+*.p12
+*.key
+*.pem
+*.log
+*.sqlite*
+*.dump
+*.bak
+*.zip
+# Historical deployment evidence contains private infrastructure identifiers.
+/docs/changes/
+/docs/*2026*.md
+/docs/TESLIM_DURUMU.md
+/scripts/prepare-local-acceptance.py

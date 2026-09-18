@@ -1,0 +1,14 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="Remvora Agent" Manufacturer="Remvora" Version="$(var.Version)" UpgradeCode="8E719EFA-EECA-4BE5-B703-10E217DE682D" Scope="perMachine">
+    <MajorUpgrade DowngradeErrorMessage="A newer Remvora Agent is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+    <StandardDirectory Id="ProgramFiles6432Folder">
+      <Directory Id="INSTALLFOLDER" Name="Remvora">
+        <Component Id="Agent" Guid="*">
+          <File Id="AgentExecutable" Source="$(var.AgentBinary)" Name="remvora-agent.exe" KeyPath="yes" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+    <Feature Id="Main" Title="Remvora Agent" Level="1"><ComponentRef Id="Agent" /></Feature>
+  </Package>
+</Wix>
