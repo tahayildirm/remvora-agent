@@ -356,7 +356,7 @@ mod tests {
                 }
                 let _ = input
                     .send(&bytes::Bytes::from_static(if cfg!(windows) {
-                        b"Write-Output ('REMVORA_PTY_' + 'VERIFIED')\r"
+                        b"echo REMVORA_PTY_^VERIFIED\r"
                     } else {
                         b"printf 'REMVORA_PTY_%s\\n' VERIFIED\n"
                     }))
@@ -373,7 +373,7 @@ mod tests {
             .unwrap();
         let offer = client.local_description().await.unwrap();
         let shell = if cfg!(windows) {
-            PathBuf::from(r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe")
+            PathBuf::from(r"C:\Windows\System32\cmd.exe")
         } else {
             PathBuf::from("/bin/sh")
         };
@@ -453,11 +453,11 @@ mod tests {
                         .unwrap();
                     cursor_requests += 1;
                 }
-                if !command_sent && output.contains("> ") {
+                if !command_sent && output.contains('>') {
                     channel
                         .send(&bytes::Bytes::from(crate::terminal::test_input(
                             &output,
-                            "Write-Output ('REMVORA_PTY_' + 'VERIFIED')\r",
+                            "echo REMVORA_PTY_^VERIFIED\r",
                         )))
                         .await
                         .unwrap();

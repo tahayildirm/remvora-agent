@@ -11,3 +11,7 @@ Remaining: independent security assessment, prolonged soak/load and recovery dri
 Seçilmiş kurulumlarda HTTPS/WSS, ilk hesap/cihaz kaydı, terminal, masaüstü görüntü/girdi, P2P ve WSS relay, açık eylemli pano ve sınırlı dosya aktarımı doğrulandı. Telefon boyutları masaüstü tarayıcıda incelendi; tüm fiziksel telefon ve işletim sistemi matrisi test edilmiş değildir.
 
 Kalanlar: bağımsız güvenlik incelemesi, uzun süreli yük/dayanıklılık ve kurtarma denemeleri, tam platform/tarayıcı matrisi, imzalı/notarize kurulumlar, SBOM/lisans envanteri, erişilebilirlik ve gerçek telefon IME/pinch testleri. Signaling tek süreçlidir; dağıtık HA broker ve yerleşik TURN kurulumu yoktur. Üretim öncesi işletmeci doğrulaması gerekir.
+
+Windows transport integration tests use `cmd.exe` (Unix: `/bin/sh`) to verify real PTY command execution over WebRTC and relay. Windows ARM PowerShell/PSReadLine timed out in GitHub runners and remains a separate runtime validation item; passing transport tests does not certify that shell.
+
+Windows taşıma entegrasyon testleri gerçek PTY komutunu WebRTC ve relay üzerinden `cmd.exe` ile (Unix: `/bin/sh`) doğrular. GitHub Windows ARM ortamındaki PowerShell/PSReadLine zaman aşımı ayrı bir çalışma zamanı doğrulama maddesidir; bu testlerin geçmesi o kabuğun doğrulandığı anlamına gelmez.

@@ -240,7 +240,7 @@ mod tests {
         let (tx, mut rx) = mpsc::channel(32);
         let id = Uuid::new_v4();
         let shell = PathBuf::from(if cfg!(windows) {
-            r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
+            r"C:\Windows\System32\cmd.exe"
         } else {
             "/bin/sh"
         });
@@ -260,7 +260,7 @@ mod tests {
         .await
         .unwrap();
         let command = if cfg!(windows) {
-            "Write-Output ('RELAY_' + 'OK')\r"
+            "echo RELAY_^OK\r"
         } else {
             "printf 'RELAY_%s\\n' OK\n"
         };
@@ -282,7 +282,7 @@ mod tests {
                     peer.receive(&json!({"channel":"input","data":STANDARD.encode("\x1b[1;1R"),"text":false,"part":0,"last":true})).await.unwrap();
                     cursor_requests += 1;
                 }
-                if !command_sent && output.contains("> ") {
+                if !command_sent && output.contains('>') {
                     peer.receive(&json!({"channel":"input","data":STANDARD.encode(crate::terminal::test_input(&output, command)),"text":false,"part":0,"last":true})).await.unwrap();
                     command_sent = true;
                 }
