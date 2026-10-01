@@ -39,7 +39,7 @@ jobs:
         with:
           targets: ${{ matrix.rust_target }}
       - name: Install WiX
-        run: dotnet tool install --global wix
+        run: dotnet tool install --global wix --version 6.*
       - name: Build Windows release
         run: cargo build --release --target ${{ matrix.rust_target }}
       - name: Smoke test executable

@@ -413,7 +413,7 @@ async fn connect(
                     let expires = chrono::DateTime::parse_from_rfc3339(signal.payload["expiresAt"].as_str().ok_or_else(||anyhow::anyhow!("Missing command expiry"))?)?;
                     ensure!(expires > chrono::Utc::now() && expires <= chrono::Utc::now()+chrono::Duration::seconds(90), "Invalid command expiry");
                     let code = if let Some(key) = args.update_trusted_key.as_ref() {
-                        match updater::check_and_stage(&client, &args.server, &args.state, key, args.update_apply_helper.as_deref()).await {
+                        match updater::check_and_stage(client, &args.server, &args.state, key, args.update_apply_helper.as_deref()).await {
                             Ok(updater::UpdateOutcome::None) => "none",
                             Ok(updater::UpdateOutcome::Staged) => "staged",
                             Ok(updater::UpdateOutcome::Applied) => "applied",
