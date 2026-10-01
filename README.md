@@ -10,10 +10,12 @@
 
 | Platform | Download / İndir |
 |---|---|
-| Windows 64-bit | [remvora-agent-windows-x86_64.zip](https://api.github.com/repos/tahayildirm/remvora-agent/actions/artifacts/11147195456/zip) |
-| Windows 32-bit | [remvora-agent-windows-x86.zip](https://api.github.com/repos/tahayildirm/remvora-agent/actions/artifacts/11146727075/zip) |
+| Windows 64-bit installer | [remvora-agent-0.3.10-x64.msi](https://github.com/tahayildirm/remvora-agent/releases/download/v0.3.10/remvora-agent-0.3.10-x64.msi) |
+| Windows 32-bit installer | [remvora-agent-0.3.10-x86.msi](https://github.com/tahayildirm/remvora-agent/releases/download/v0.3.10/remvora-agent-0.3.10-x86.msi) |
+| Windows 64-bit ZIP | [remvora-agent-0.3.10-windows-x86_64.zip](https://github.com/tahayildirm/remvora-agent/releases/download/v0.3.10/remvora-agent-0.3.10-windows-x86_64.zip) |
+| Windows 32-bit ZIP | [remvora-agent-0.3.10-windows-x86.zip](https://github.com/tahayildirm/remvora-agent/releases/download/v0.3.10/remvora-agent-0.3.10-windows-x86.zip) |
 
-These GitHub Actions artifacts require a GitHub session and expire on 2026-12-30. / Bu GitHub Actions artifact dosyaları GitHub oturumu ister ve 2026-12-30 tarihinde sona erer.
+Release page / Yayın sayfası: [Remvora Agent 0.3.10](https://github.com/tahayildirm/remvora-agent/releases/tag/v0.3.10)
 
 | Başlangıç / Start | Türkçe | English |
 |---|---|---|
