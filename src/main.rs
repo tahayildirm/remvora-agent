@@ -269,11 +269,7 @@ async fn enroll_with_token(
     );
     Ok(())
 }
-async fn activate_device(
-    client: &reqwest::Client,
-    args: &Args,
-    identity: &Identity,
-) -> Result<()> {
+async fn activate_device(client: &reqwest::Client, args: &Args, identity: &Identity) -> Result<()> {
     let proof = proof(client, args, identity, "activate").await?;
     client
         .post(args.server.join("api/v1/agent/activate")?)

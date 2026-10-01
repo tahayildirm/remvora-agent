@@ -294,7 +294,9 @@ fn unpack_agent_binary(artifact: &Path, destination: &Path) -> Result<()> {
         output.sync_all()?;
         return Ok(());
     }
-    Err(anyhow::anyhow!("Update artifact does not contain remvora-agent binary"))
+    Err(anyhow::anyhow!(
+        "Update artifact does not contain remvora-agent binary"
+    ))
 }
 fn install_from(
     state: &Path,
@@ -380,8 +382,7 @@ mod tests {
         let artifact = directory.join("new.tar.gz");
         {
             let output = std::fs::File::create(&artifact).unwrap();
-            let encoder =
-                flate2::write::GzEncoder::new(output, flate2::Compression::default());
+            let encoder = flate2::write::GzEncoder::new(output, flate2::Compression::default());
             let mut archive = tar::Builder::new(encoder);
             let mut header = tar::Header::new_gnu();
             let payload = b"new-test-binary-not-executed";
