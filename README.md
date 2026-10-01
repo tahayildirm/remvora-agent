@@ -6,6 +6,15 @@
 
 [Server / API](https://github.com/tahayildirm/remvora-server) · [Web panel](https://github.com/tahayildirm/remvora-web) · [Agent](https://github.com/tahayildirm/remvora-agent)
 
+## Downloads / İndir
+
+| Platform | Download / İndir |
+|---|---|
+| Windows 64-bit | [remvora-agent-windows-x86_64.zip](https://api.github.com/repos/tahayildirm/remvora-agent/actions/artifacts/11147195456/zip) |
+| Windows 32-bit | [remvora-agent-windows-x86.zip](https://api.github.com/repos/tahayildirm/remvora-agent/actions/artifacts/11146727075/zip) |
+
+These GitHub Actions artifacts require a GitHub session and expire on 2026-12-30. / Bu GitHub Actions artifact dosyaları GitHub oturumu ister ve 2026-12-30 tarihinde sona erer.
+
 | Başlangıç / Start | Türkçe | English |
 |---|---|---|
 | Cihaz bağımlılıkları, kurulum ve servis / Device prerequisites, setup and service | [Cihaz rehberi](docs/GUIDE.tr.md) | [Device guide](docs/GUIDE.en.md) |
