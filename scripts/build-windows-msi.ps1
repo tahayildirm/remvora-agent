@@ -16,7 +16,7 @@ if ($SigningCertificateThumbprint) {
     & signtool sign /fd SHA256 /sha1 $SigningCertificateThumbprint $binary
     if ($LASTEXITCODE -ne 0) { throw 'Executable signing failed.' }
 }
-& wix build (Join-Path $root 'deploy/windows/Remvora.wxs') -arch $Architecture "-dVersion=$Version" "-dAgentBinary=$binary" -o $package
+& wix build (Join-Path $root 'deploy/windows/Remvora.wxs') -arch $Architecture -d "Version=$Version" -d "AgentBinary=$binary" -o $package
 if ($LASTEXITCODE -ne 0) { throw 'MSI build failed.' }
 if ($SigningCertificateThumbprint) {
     & signtool sign /fd SHA256 /sha1 $SigningCertificateThumbprint $package

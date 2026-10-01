@@ -139,15 +139,15 @@ fn select_monitor(id: Option<u32>) -> Result<DisplayTarget> {
         return Ok(DisplayTarget::Native(monitor));
     }
     #[cfg(target_os = "linux")]
-    if id.is_none() || id == Some(XRootDisplay::ID) {
-        if let Some(fallback) = XRootDisplay::detect()? {
-            tracing::warn!(
-                width = fallback.width,
-                height = fallback.height,
-                "Using X11 root display fallback because no native monitor was reported"
-            );
-            return Ok(DisplayTarget::XRoot(fallback));
-        }
+    if (id.is_none() || id == Some(XRootDisplay::ID))
+        && let Some(fallback) = XRootDisplay::detect()?
+    {
+        tracing::warn!(
+            width = fallback.width,
+            height = fallback.height,
+            "Using X11 root display fallback because no native monitor was reported"
+        );
+        return Ok(DisplayTarget::XRoot(fallback));
     }
     Err(anyhow::anyhow!("Selected display unavailable"))
 }
@@ -270,7 +270,7 @@ fn capture_x11_root(display: &XRootDisplay) -> Result<xcap::image::RgbaImage> {
         )?
         .reply()
         .context("X11 GetImage root capture")?;
-    let depth = u8::from(reply.depth);
+    let depth = reply.depth;
     ensure!(depth >= 24, "Unsupported X11 root depth");
     let format = setup
         .pixmap_formats
@@ -322,9 +322,9 @@ fn capture_x11_root(display: &XRootDisplay) -> Result<xcap::image::RgbaImage> {
                     row[start + bytes_per_pixel.saturating_sub(1)],
                 ])
             };
-            rgba.push(mask_value(raw, visual.red_mask.into()));
-            rgba.push(mask_value(raw, visual.green_mask.into()));
-            rgba.push(mask_value(raw, visual.blue_mask.into()));
+            rgba.push(mask_value(raw, visual.red_mask));
+            rgba.push(mask_value(raw, visual.green_mask));
+            rgba.push(mask_value(raw, visual.blue_mask));
             rgba.push(255);
         }
     }
