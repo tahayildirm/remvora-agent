@@ -21,25 +21,35 @@ use webrtc::media::Sample;
 pub trait ScreenCaptureProvider {
     fn frame(&self) -> Result<xcap::image::RgbaImage>;
 }
+#[derive(Clone)]
+enum DisplayTarget {
+    Native(xcap::Monitor),
+    #[cfg(target_os = "linux")]
+    XRoot(XRootDisplay),
+}
 struct NativeCapture {
-    monitor: xcap::Monitor,
+    target: DisplayTarget,
     #[cfg(target_os = "linux")]
     wayland: Option<libwayshot_xcap::WayshotConnection>,
 }
 impl NativeCapture {
-    fn new(monitor: xcap::Monitor) -> Self {
+    fn new(target: DisplayTarget) -> Self {
         #[cfg(target_os = "linux")]
-        let wayland = if std::env::var_os("WAYLAND_DISPLAY").is_some() {
-            // Probe once. Supported wlroots compositors avoid a failed portal request
-            // on every frame; other desktops retain xcap's existing capture path.
-            libwayshot_xcap::WayshotConnection::new()
-                .ok()
-                .filter(|connection| fast_wayland_frame(connection, &monitor).is_ok())
+        let wayland = if let DisplayTarget::Native(monitor) = &target {
+            if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+                // Probe once. Supported wlroots compositors avoid a failed portal request
+                // on every frame; other desktops retain xcap's existing capture path.
+                libwayshot_xcap::WayshotConnection::new()
+                    .ok()
+                    .filter(|connection| fast_wayland_frame(connection, monitor).is_ok())
+            } else {
+                None
+            }
         } else {
             None
         };
         Self {
-            monitor,
+            target,
             #[cfg(target_os = "linux")]
             wayland,
         }
@@ -70,28 +80,362 @@ fn fast_wayland_frame(
 impl ScreenCaptureProvider for NativeCapture {
     fn frame(&self) -> Result<xcap::image::RgbaImage> {
         #[cfg(target_os = "linux")]
-        if let Some(connection) = &self.wayland {
-            return fast_wayland_frame(connection, &self.monitor);
+        if let Some(connection) = &self.wayland
+            && let DisplayTarget::Native(monitor) = &self.target
+        {
+            return fast_wayland_frame(connection, monitor);
         }
-        Ok(self.monitor.capture_image()?)
+        match &self.target {
+            DisplayTarget::Native(monitor) => Ok(monitor.capture_image()?),
+            #[cfg(target_os = "linux")]
+            DisplayTarget::XRoot(display) => display.capture(),
+        }
+    }
+}
+impl DisplayTarget {
+    fn id(&self) -> Result<u32> {
+        Ok(match self {
+            DisplayTarget::Native(monitor) => monitor.id()?,
+            #[cfg(target_os = "linux")]
+            DisplayTarget::XRoot(display) => display.id,
+        })
+    }
+    fn x(&self) -> Result<i32> {
+        Ok(match self {
+            DisplayTarget::Native(monitor) => monitor.x()?,
+            #[cfg(target_os = "linux")]
+            DisplayTarget::XRoot(display) => display.x,
+        })
+    }
+    fn y(&self) -> Result<i32> {
+        Ok(match self {
+            DisplayTarget::Native(monitor) => monitor.y()?,
+            #[cfg(target_os = "linux")]
+            DisplayTarget::XRoot(display) => display.y,
+        })
+    }
+    fn width(&self) -> Result<u32> {
+        Ok(match self {
+            DisplayTarget::Native(monitor) => monitor.width()?,
+            #[cfg(target_os = "linux")]
+            DisplayTarget::XRoot(display) => display.width,
+        })
+    }
+    fn height(&self) -> Result<u32> {
+        Ok(match self {
+            DisplayTarget::Native(monitor) => monitor.height()?,
+            #[cfg(target_os = "linux")]
+            DisplayTarget::XRoot(display) => display.height,
+        })
     }
 }
 /// Selection fails closed if a configured display is disconnected; it never silently changes target.
-fn select_monitor(id: Option<u32>) -> Result<xcap::Monitor> {
-    xcap::Monitor::all()?
-        .into_iter()
-        .find(|monitor| match id {
-            Some(id) => monitor.id().ok() == Some(id),
-            None => monitor.is_primary().unwrap_or(false),
-        })
-        .ok_or_else(|| anyhow::anyhow!("Selected display unavailable"))
+fn select_monitor(id: Option<u32>) -> Result<DisplayTarget> {
+    let monitors = xcap::Monitor::all()?;
+    if let Some(monitor) = monitors.into_iter().find(|monitor| match id {
+        Some(id) => monitor.id().ok() == Some(id),
+        None => monitor.is_primary().unwrap_or(false),
+    }) {
+        return Ok(DisplayTarget::Native(monitor));
+    }
+    #[cfg(target_os = "linux")]
+    if id.is_none() || id == Some(XRootDisplay::ID) {
+        if let Some(fallback) = XRootDisplay::detect()? {
+            tracing::warn!(
+                width = fallback.width,
+                height = fallback.height,
+                "Using X11 root display fallback because no native monitor was reported"
+            );
+            return Ok(DisplayTarget::XRoot(fallback));
+        }
+    }
+    Err(anyhow::anyhow!("Selected display unavailable"))
 }
 pub fn displays() -> Result<Vec<serde_json::Value>> {
-    xcap::Monitor::all()?.iter().map(|monitor| Ok(serde_json::json!({
+    let displays: Vec<_> = xcap::Monitor::all()?.iter().map(|monitor| Ok(serde_json::json!({
         "id":monitor.id()?, "name":monitor.name()?, "x":monitor.x()?, "y":monitor.y()?,
         "width":monitor.width()?, "height":monitor.height()?, "primary":monitor.is_primary()?
-    }))).collect()
+    }))).collect::<Result<_>>()?;
+    #[cfg(target_os = "linux")]
+    if displays.is_empty()
+        && let Some(display) = XRootDisplay::detect()?
+    {
+        return Ok(vec![display.as_json()]);
+    }
+    Ok(displays)
 }
+
+#[cfg(target_os = "linux")]
+#[derive(Clone)]
+struct XRootDisplay {
+    id: u32,
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+}
+
+#[cfg(target_os = "linux")]
+impl XRootDisplay {
+    const ID: u32 = u32::MAX - 1;
+
+    fn detect() -> Result<Option<Self>> {
+        if std::env::var_os("DISPLAY").is_none() {
+            return Ok(None);
+        }
+        let output = std::process::Command::new("xwininfo")
+            .args(["-root"])
+            .output()
+            .context("xwininfo root query")?;
+        if !output.status.success() {
+            return Ok(None);
+        }
+        let text = String::from_utf8_lossy(&output.stdout);
+        let mut width = None;
+        let mut height = None;
+        for line in text.lines() {
+            let line = line.trim();
+            if let Some(value) = line.strip_prefix("Width:") {
+                width = value.trim().parse::<u32>().ok();
+            } else if let Some(value) = line.strip_prefix("Height:") {
+                height = value.trim().parse::<u32>().ok();
+            }
+        }
+        Ok(match (width, height) {
+            (Some(width), Some(height)) if width >= 2 && height >= 2 => Some(Self {
+                id: Self::ID,
+                x: 0,
+                y: 0,
+                width,
+                height,
+            }),
+            _ => None,
+        })
+    }
+
+    fn as_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "id": self.id,
+            "name": "X11 root display",
+            "x": self.x,
+            "y": self.y,
+            "width": self.width,
+            "height": self.height,
+            "primary": true,
+            "fallback": "x11-root"
+        })
+    }
+
+    fn capture(&self) -> Result<xcap::image::RgbaImage> {
+        match capture_x11_root(self) {
+            Ok(frame) => return Ok(frame),
+            Err(error) => {
+                tracing::warn!(
+                    %error,
+                    "Direct X11 root capture failed; falling back to xwd"
+                );
+            }
+        }
+        let output = std::process::Command::new("xwd")
+            .args(["-root", "-silent"])
+            .output()
+            .context("xwd root capture")?;
+        ensure!(output.status.success(), "xwd root capture failed");
+        decode_xwd(&output.stdout)
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn capture_x11_root(display: &XRootDisplay) -> Result<xcap::image::RgbaImage> {
+    use x11rb::{
+        connection::Connection,
+        protocol::xproto::{ConnectionExt, ImageFormat},
+    };
+
+    let (connection, screen_index) = x11rb::connect(None).context("connect to X11 display")?;
+    let setup = connection.setup();
+    let screen = setup
+        .roots
+        .get(screen_index)
+        .ok_or_else(|| anyhow::anyhow!("Missing X11 screen"))?;
+    let reply = connection
+        .get_image(
+            ImageFormat::Z_PIXMAP,
+            screen.root,
+            display.x as i16,
+            display.y as i16,
+            display.width as u16,
+            display.height as u16,
+            u32::MAX,
+        )?
+        .reply()
+        .context("X11 GetImage root capture")?;
+    let depth = u8::from(reply.depth);
+    ensure!(depth >= 24, "Unsupported X11 root depth");
+    let format = setup
+        .pixmap_formats
+        .iter()
+        .find(|format| format.depth == reply.depth)
+        .ok_or_else(|| anyhow::anyhow!("Missing X11 pixmap format"))?;
+    let bits_per_pixel = usize::from(format.bits_per_pixel);
+    ensure!(
+        [24, 32].contains(&bits_per_pixel),
+        "Unsupported X11 bits per pixel"
+    );
+    let bytes_per_pixel = bits_per_pixel / 8;
+    let scanline_pad = usize::from(format.scanline_pad).max(8);
+    let row_bits = display.width as usize * bits_per_pixel;
+    let bytes_per_line = row_bits.div_ceil(scanline_pad) * scanline_pad / 8;
+    ensure!(
+        reply.data.len() >= bytes_per_line.saturating_mul(display.height as usize),
+        "Truncated X11 image data"
+    );
+    let visual = screen
+        .allowed_depths
+        .iter()
+        .flat_map(|depth| depth.visuals.iter())
+        .find(|visual| visual.visual_id == screen.root_visual)
+        .ok_or_else(|| anyhow::anyhow!("Missing X11 root visual"))?;
+    let image_byte_order_lsb =
+        setup.image_byte_order == x11rb::protocol::xproto::ImageOrder::LSB_FIRST;
+    let mut rgba = Vec::with_capacity(display.width as usize * display.height as usize * 4);
+    for y in 0..display.height as usize {
+        let row = &reply.data[y * bytes_per_line..];
+        for x in 0..display.width as usize {
+            let start = x * bytes_per_pixel;
+            let raw = if image_byte_order_lsb {
+                u32::from_le_bytes([
+                    row[start],
+                    row[start + 1],
+                    row[start + 2],
+                    if bytes_per_pixel == 4 {
+                        row[start + 3]
+                    } else {
+                        0
+                    },
+                ])
+            } else {
+                u32::from_be_bytes([
+                    if bytes_per_pixel == 4 { row[start] } else { 0 },
+                    row[start + bytes_per_pixel.saturating_sub(3)],
+                    row[start + bytes_per_pixel.saturating_sub(2)],
+                    row[start + bytes_per_pixel.saturating_sub(1)],
+                ])
+            };
+            rgba.push(mask_value(raw, visual.red_mask.into()));
+            rgba.push(mask_value(raw, visual.green_mask.into()));
+            rgba.push(mask_value(raw, visual.blue_mask.into()));
+            rgba.push(255);
+        }
+    }
+    xcap::image::RgbaImage::from_raw(display.width, display.height, rgba)
+        .ok_or_else(|| anyhow::anyhow!("Invalid X11 frame"))
+}
+
+#[cfg(target_os = "linux")]
+fn decode_xwd(data: &[u8]) -> Result<xcap::image::RgbaImage> {
+    const HEADER_SIZE: usize = 100;
+    ensure!(data.len() >= HEADER_SIZE, "XWD frame is too small");
+    let first: [u8; 4] = data
+        .get(0..4)
+        .ok_or_else(|| anyhow::anyhow!("Truncated XWD header"))?
+        .try_into()?;
+    let header_size_be = u32::from_be_bytes(first) as usize;
+    let little_endian = header_size_be < HEADER_SIZE || header_size_be > data.len();
+    let read_u32 = |offset: usize| -> Result<u32> {
+        let bytes: [u8; 4] = data
+            .get(offset..offset + 4)
+            .ok_or_else(|| anyhow::anyhow!("Truncated XWD header"))?
+            .try_into()?;
+        Ok(if little_endian {
+            u32::from_le_bytes(bytes)
+        } else {
+            u32::from_be_bytes(bytes)
+        })
+    };
+    let header_size = read_u32(0)? as usize;
+    let pixmap_format = read_u32(8)?;
+    let depth = read_u32(12)?;
+    let width = read_u32(16)?;
+    let height = read_u32(20)?;
+    let byte_order = read_u32(28)?;
+    let bitmap_unit = read_u32(32)?;
+    let bitmap_bit_order = read_u32(36)?;
+    let bitmap_pad = read_u32(40)?;
+    let bits_per_pixel = read_u32(44)?;
+    let bytes_per_line = read_u32(48)? as usize;
+    let visual_class = read_u32(52)?;
+    let red_mask = read_u32(56)?;
+    let green_mask = read_u32(60)?;
+    let blue_mask = read_u32(64)?;
+    let colors = read_u32(76)? as usize;
+    ensure!(
+        header_size <= data.len() && pixmap_format == 2 && [24, 32].contains(&bits_per_pixel),
+        "Unsupported XWD frame format"
+    );
+    ensure!(
+        depth >= 24
+            && byte_order <= 1
+            && bitmap_unit > 0
+            && bitmap_bit_order <= 1
+            && bitmap_pad > 0
+            && visual_class == 4,
+        "Unsupported XWD visual"
+    );
+    let bytes_per_pixel = (bits_per_pixel / 8) as usize;
+    let pixel_offset = header_size
+        .checked_add(colors.saturating_mul(12))
+        .ok_or_else(|| anyhow::anyhow!("Invalid XWD color table"))?;
+    let pixels = data
+        .get(pixel_offset..)
+        .ok_or_else(|| anyhow::anyhow!("Missing XWD pixels"))?;
+    ensure!(
+        pixels.len() >= bytes_per_line.saturating_mul(height as usize),
+        "Truncated XWD pixels"
+    );
+    let mut rgba = Vec::with_capacity(width as usize * height as usize * 4);
+    for y in 0..height as usize {
+        let row = &pixels[y * bytes_per_line..];
+        for x in 0..width as usize {
+            let start = x * bytes_per_pixel;
+            let raw = match byte_order {
+                0 => u32::from_le_bytes([
+                    row[start],
+                    row[start + 1],
+                    row[start + 2],
+                    if bytes_per_pixel == 4 {
+                        row[start + 3]
+                    } else {
+                        0
+                    },
+                ]),
+                _ => u32::from_be_bytes([
+                    if bytes_per_pixel == 4 { row[start] } else { 0 },
+                    row[start + bytes_per_pixel.saturating_sub(3)],
+                    row[start + bytes_per_pixel.saturating_sub(2)],
+                    row[start + bytes_per_pixel.saturating_sub(1)],
+                ]),
+            };
+            rgba.push(mask_value(raw, red_mask));
+            rgba.push(mask_value(raw, green_mask));
+            rgba.push(mask_value(raw, blue_mask));
+            rgba.push(255);
+        }
+    }
+    xcap::image::RgbaImage::from_raw(width, height, rgba)
+        .ok_or_else(|| anyhow::anyhow!("Invalid XWD frame"))
+}
+
+#[cfg(target_os = "linux")]
+fn mask_value(pixel: u32, mask: u32) -> u8 {
+    if mask == 0 {
+        return 0;
+    }
+    let shift = mask.trailing_zeros();
+    let max = mask >> shift;
+    (((pixel & mask) >> shift) * 255 / max) as u8
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize)]
 pub struct VideoSettings {
     pub fps: u32,

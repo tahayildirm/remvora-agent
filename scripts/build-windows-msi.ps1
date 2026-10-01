@@ -1,11 +1,12 @@
 param(
     [Parameter(Mandatory=$true)][ValidatePattern('^\d+\.\d+\.\d+$')][string]$Version,
-    [ValidateSet('x64','arm64')][string]$Architecture = 'x64',
+    [ValidateSet('x86','x64','arm64')][string]$Architecture = 'x64',
+    [string]$AgentBinary,
     [string]$SigningCertificateThumbprint
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
-$binary = Join-Path $root 'target/release/remvora-agent.exe'
+$binary = if ($AgentBinary) { $AgentBinary } else { Join-Path $root 'target/release/remvora-agent.exe' }
 if (-not (Test-Path $binary -PathType Leaf)) { throw 'Build the native Windows release first.' }
 $output = Join-Path $root '.artifacts'
 New-Item -ItemType Directory -Force $output | Out-Null

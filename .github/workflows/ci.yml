@@ -21,6 +21,56 @@ jobs:
       - run: cargo clippy --locked --all-targets -- -D warnings
       - run: cargo test --locked
       - run: cargo build --locked --release
+  windows-release:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - rust_target: x86_64-pc-windows-msvc
+            artifact_arch: x86_64
+            wix_arch: x64
+          - rust_target: i686-pc-windows-msvc
+            artifact_arch: x86
+            wix_arch: x86
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
+      - name: Install WiX
+        run: dotnet tool install --global wix
+      - name: Build Windows release
+        run: cargo build --locked --release --target ${{ matrix.rust_target }}
+      - name: Smoke test executable
+        shell: pwsh
+        run: |
+          & target/${{ matrix.rust_target }}/release/remvora-agent.exe --help
+      - name: Package ZIP
+        shell: pwsh
+        run: |
+          python scripts/package-release.py --version ((Get-Content Cargo.toml | Select-String '^version = "(.+)"').Matches.Groups[1].Value) --system windows --arch ${{ matrix.artifact_arch }} --binary target/${{ matrix.rust_target }}/release/remvora-agent.exe
+      - name: Package MSI
+        shell: pwsh
+        run: |
+          $version = (Get-Content Cargo.toml | Select-String '^version = "(.+)"').Matches.Groups[1].Value
+          ./scripts/build-windows-msi.ps1 -Version $version -Architecture ${{ matrix.wix_arch }} -AgentBinary target/${{ matrix.rust_target }}/release/remvora-agent.exe
+      - name: Checksums
+        shell: pwsh
+        run: |
+          Get-ChildItem .artifacts -File | Where-Object { $_.Extension -in '.zip','.msi' } | ForEach-Object {
+            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $($_.Name)" | Set-Content "$($_.FullName).sha256"
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: remvora-agent-windows-${{ matrix.artifact_arch }}
+          path: |
+            .artifacts/*.zip
+            .artifacts/*.zip.sha256
+            .artifacts/*.msi
+            .artifacts/*.msi.sha256
+          if-no-files-found: error
   audit:
     runs-on: ubuntu-latest
     steps:

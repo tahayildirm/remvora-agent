@@ -57,6 +57,10 @@ struct Args {
     allow_loopback_http: bool,
     #[arg(long, env = "REMVORA_CA_CERTIFICATE")]
     ca_certificate: Option<PathBuf>,
+    #[arg(long, env = "REMVORA_UPDATE_TRUSTED_KEY")]
+    update_trusted_key: Option<PathBuf>,
+    #[arg(long, env = "REMVORA_UPDATE_APPLY_HELPER")]
+    update_apply_helper: Option<PathBuf>,
     #[command(subcommand)]
     command: Command,
 }
@@ -185,30 +189,31 @@ async fn run(args: Args) -> Result<()> {
         Command::Enroll => {
             let token = std::env::var("REMVORA_ENROLLMENT_TOKEN")
                 .map_err(|_| anyhow::anyhow!("Set REMVORA_ENROLLMENT_TOKEN"))?;
-            let result=post(&client,&args,"api/v1/enrollment/request",json!({"token":token,"publicKey":identity.public_key()?,"operatingSystem":std::env::consts::OS,"architecture":std::env::consts::ARCH,"agentVersion":env!("CARGO_PKG_VERSION")})).await?;
-            let device = result["deviceId"]
-                .as_str()
-                .ok_or_else(|| anyhow::anyhow!("Missing device identity"))?;
-            Uuid::parse_str(device)?;
-            std::fs::write(args.state.join("device-id"), device)?;
-            tracing::info!(
-                device_id = device,
-                "Enrollment submitted; administrator approval is required"
-            );
+            enroll_with_token(&client, &args, &identity, token.trim()).await?;
         }
         Command::Activate => {
-            let proof = proof(&client, &args, &identity, "activate").await?;
-            client
-                .post(args.server.join("api/v1/agent/activate")?)
-                .json(&proof)
-                .send()
-                .await?
-                .error_for_status()?;
-            tracing::info!("Device activated");
+            activate_device(&client, &args, &identity).await?;
         }
         Command::Run => {
+            if let Some(key) = args.update_trusted_key.clone() {
+                let update_client = client.clone();
+                let update_server = args.server.clone();
+                let update_state = args.state.clone();
+                let update_apply_helper = args.update_apply_helper.clone();
+                tokio::spawn(async move {
+                    updater::poll_and_stage(
+                        update_client,
+                        update_server,
+                        update_state,
+                        key,
+                        update_apply_helper,
+                    )
+                    .await;
+                });
+            }
             let mut retry = reconnect::Retry::default();
             loop {
+                let _ = service_bootstrap(&client, &args, &identity).await;
                 tokio::select! {
                     result=connect(&client,&args,&identity,&mut retry) => {
                         if result.is_err() { tracing::warn!("Control connection ended; retrying with backoff"); }
@@ -220,6 +225,63 @@ async fn run(args: Args) -> Result<()> {
             }
         }
     }
+    Ok(())
+}
+async fn service_bootstrap(
+    client: &reqwest::Client,
+    args: &Args,
+    identity: &Identity,
+) -> Result<()> {
+    let token_path = args.state.join("enrollment-token");
+    if !args.state.join("device-id").exists() && token_path.exists() {
+        let metadata = std::fs::symlink_metadata(&token_path)?;
+        ensure!(
+            !metadata.file_type().is_symlink(),
+            "Enrollment token must not be a symlink"
+        );
+        let token = std::fs::read_to_string(&token_path)?;
+        enroll_with_token(client, args, identity, token.trim()).await?;
+        std::fs::remove_file(&token_path)?;
+    }
+    if args.state.join("device-id").exists()
+        && let Err(error) = activate_device(client, args, identity).await
+    {
+        tracing::warn!(%error, "Device activation not completed yet");
+    }
+    Ok(())
+}
+async fn enroll_with_token(
+    client: &reqwest::Client,
+    args: &Args,
+    identity: &Identity,
+    token: &str,
+) -> Result<()> {
+    ensure!(!token.is_empty(), "Enrollment token is empty");
+    let result=post(client,args,"api/v1/enrollment/request",json!({"token":token,"publicKey":identity.public_key()?,"operatingSystem":std::env::consts::OS,"architecture":std::env::consts::ARCH,"agentVersion":env!("CARGO_PKG_VERSION")})).await?;
+    let device = result["deviceId"]
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("Missing device identity"))?;
+    Uuid::parse_str(device)?;
+    std::fs::write(args.state.join("device-id"), device)?;
+    tracing::info!(
+        device_id = device,
+        "Enrollment submitted; administrator approval is required"
+    );
+    Ok(())
+}
+async fn activate_device(
+    client: &reqwest::Client,
+    args: &Args,
+    identity: &Identity,
+) -> Result<()> {
+    let proof = proof(client, args, identity, "activate").await?;
+    client
+        .post(args.server.join("api/v1/agent/activate")?)
+        .json(&proof)
+        .send()
+        .await?
+        .error_for_status()?;
+    tracing::info!("Device activated");
     Ok(())
 }
 async fn post(client: &reqwest::Client, args: &Args, path: &str, body: Value) -> Result<Value> {
@@ -348,6 +410,26 @@ async fn connect(
                     ensure!(reboot_seen.len()<64 && reboot_seen.insert(command_id), "Command replay");
                     let code = reboot::request(args.allow_reboot).await;
                     sink.send(Message::Text(serde_json::to_string(&Signal::new("device.reboot.result",None,json!({"commandId":command_id,"code":code})))?.into())).await?;
+                    continue;
+                }
+                if signal.kind == "agent.updateNow" && signal.session_id.is_none() {
+                    let command_id: Uuid = serde_json::from_value(signal.payload["commandId"].clone())?;
+                    let expires = chrono::DateTime::parse_from_rfc3339(signal.payload["expiresAt"].as_str().ok_or_else(||anyhow::anyhow!("Missing command expiry"))?)?;
+                    ensure!(expires > chrono::Utc::now() && expires <= chrono::Utc::now()+chrono::Duration::seconds(90), "Invalid command expiry");
+                    let code = if let Some(key) = args.update_trusted_key.as_ref() {
+                        match updater::check_and_stage(&client, &args.server, &args.state, key, args.update_apply_helper.as_deref()).await {
+                            Ok(updater::UpdateOutcome::None) => "none",
+                            Ok(updater::UpdateOutcome::Staged) => "staged",
+                            Ok(updater::UpdateOutcome::Applied) => "applied",
+                            Err(error) => {
+                                tracing::warn!(%error, "Manual agent update check failed");
+                                "failed"
+                            }
+                        }
+                    } else {
+                        "disabled"
+                    };
+                    sink.send(Message::Text(serde_json::to_string(&Signal::new("agent.updateNow.result",None,json!({"commandId":command_id,"code":code})))?.into())).await?;
                     continue;
                 }
                 let id=signal.session_id.ok_or_else(||anyhow::anyhow!("Missing session"))?;

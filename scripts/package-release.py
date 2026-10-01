@@ -9,16 +9,19 @@ import zipfile
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--version', required=True)
+parser.add_argument('--system', choices=['macos','windows','linux'])
+parser.add_argument('--arch', choices=['x86','x86_64','aarch64'])
+parser.add_argument('--binary')
 args = parser.parse_args()
 if not args.version or any(c not in '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.+-' for c in args.version):
     parser.error('Invalid release version')
 root = Path(__file__).resolve().parent.parent
-system = {'Darwin':'macos','Windows':'windows','Linux':'linux'}[platform.system()]
-arch = {'arm64':'aarch64','aarch64':'aarch64','x86_64':'x86_64','AMD64':'x86_64'}[platform.machine()]
-binary = root/'target/release'/('remvora-agent.exe' if system == 'windows' else 'remvora-agent')
+system = args.system or {'Darwin':'macos','Windows':'windows','Linux':'linux'}[platform.system()]
+arch = args.arch or {'arm64':'aarch64','aarch64':'aarch64','x86_64':'x86_64','AMD64':'x86_64','x86':'x86','i386':'x86','i686':'x86'}[platform.machine()]
+binary = Path(args.binary) if args.binary else root/'target/release'/('remvora-agent.exe' if system == 'windows' else 'remvora-agent')
 if not binary.is_file():
     parser.error('Build the native release executable first')
-files = [(binary,binary.name)] + [(root/name,name) for name in ['README.md','LICENSE','SECURITY.md','docs/protocol-v1.md','docs/release-and-update.md','docs/remote-capabilities.md','scripts/update-service.py','scripts/install-linux-user.py']]
+files = [(binary,binary.name)] + [(root/name,name) for name in ['README.md','LICENSE','SECURITY.md','docs/protocol-v1.md','docs/release-and-update.md','docs/remote-capabilities.md','scripts/update-service.py','scripts/install-linux-user.py','scripts/install-windows-service.ps1']]
 files += [(path,str(path.relative_to(root))) for path in (root/'deploy').glob('*.example')]
 output = root/'.artifacts'; output.mkdir(exist_ok=True)
 name = f'remvora-agent-{args.version}-{system}-{arch}'

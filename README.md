@@ -50,7 +50,7 @@ cargo build --release --locked
 
 ### İşletim sistemi ve bağlantı sınırları
 
-Linux/Raspberry için erişilebilir grafik oturumu ve ekran arka ucu; ses için PulseAudio/PipeWire monitor ve `parec` gerekir. macOS ekran kaydı/erişilebilirlik izinleri ister; ses yardımcısı macOS 13+ kullanır. Windows masaüstü etkileşimli kullanıcı oturumu ister; Session 0 servisi kullanıcı masaüstüne erişim sağlamaz. Ayrıntılar ve paket listeleri [cihaz rehberinde](docs/GUIDE.tr.md).
+Linux/Raspberry için erişilebilir grafik oturumu ve ekran arka ucu; ses için PulseAudio/PipeWire monitor ve `parec` gerekir. macOS ekran kaydı/erişilebilirlik izinleri ister; ses yardımcısı macOS 13+ kullanır. Windows MSI `RemvoraAgent` servisini oturum açılmadan çalışan makine ajanı olarak kurar; masaüstü kontrolü yine etkileşimli kullanıcı oturumu ister ve Session 0 servisi kullanıcı masaüstüne erişim sağlamaz. Ayrıntılar ve paket listeleri [cihaz rehberinde](docs/GUIDE.tr.md).
 
 STUN adres keşfidir, relay değildir; CGNAT/firewall nedeniyle her ağda P2P garanti edilmez. WSS fallback sunucu trafiği kullanır ve sunucunun içeriği göremediği uçtan uca şifreleme değildir. Yerleşik TURN kurulumu yoktur. Platform kaynak derlemesinin başarılı olması tüm donanım/OS özelliklerinin doğrulandığı anlamına gelmez; [test durumu ve kalanlar](docs/STATUS.md) yayımlanmıştır.
 
@@ -89,7 +89,7 @@ Local opt-ins and server permissions apply together. Transfers do not overwrite 
 
 ### Platform and network limits
 
-Linux/Raspberry need an accessible graphical session and capture backend; audio needs a PulseAudio/PipeWire monitor and `parec`. macOS requires Screen Recording/Accessibility permissions; its audio helper uses macOS 13+. Windows desktop capture needs an interactive user session; a Session 0 service does not provide access to the logged-in desktop. See prerequisites and package lists in the [device guide](docs/GUIDE.en.md).
+Linux/Raspberry need an accessible graphical session and capture backend; audio needs a PulseAudio/PipeWire monitor and `parec`. macOS requires Screen Recording/Accessibility permissions; its audio helper uses macOS 13+. The Windows MSI installs `RemvoraAgent` as a machine service that runs before user logon; desktop capture still needs an interactive user session, and a Session 0 service does not provide access to the logged-in desktop. See prerequisites and package lists in the [device guide](docs/GUIDE.en.md).
 
 STUN discovers addresses rather than relaying media. CGNAT/firewalls can prevent direct P2P; WSS fallback uses hosting bandwidth and is not server-blind end-to-end encryption. No built-in TURN deployment is included. Successful source builds do not certify every hardware/OS feature; read the published [validation status and remaining work](docs/STATUS.md).
 

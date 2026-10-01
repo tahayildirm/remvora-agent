@@ -10,6 +10,7 @@ use std::{
     fs::OpenOptions,
     io::{Read, Write},
     path::{Path, PathBuf},
+    time::Duration,
 };
 
 #[derive(Deserialize)]
@@ -19,6 +20,134 @@ struct Manifest {
     os: String,
     arch: String,
     sha256: String,
+}
+
+#[derive(Deserialize)]
+struct LatestResponse {
+    update: bool,
+    #[serde(rename = "artifactUrl")]
+    artifact_url: Option<String>,
+    #[serde(rename = "manifestUrl")]
+    manifest_url: Option<String>,
+    #[serde(rename = "signatureUrl")]
+    signature_url: Option<String>,
+}
+
+pub enum UpdateOutcome {
+    None,
+    Staged,
+    Applied,
+}
+
+pub async fn poll_and_stage(
+    client: reqwest::Client,
+    server: url::Url,
+    state: PathBuf,
+    trusted_key: PathBuf,
+    apply_helper: Option<PathBuf>,
+) {
+    loop {
+        if let Err(error) = check_and_stage(
+            &client,
+            &server,
+            &state,
+            &trusted_key,
+            apply_helper.as_deref(),
+        )
+        .await
+        {
+            tracing::warn!(%error, "Agent update check failed");
+        }
+        tokio::time::sleep(Duration::from_secs(30 * 60)).await;
+    }
+}
+
+pub async fn check_and_stage(
+    client: &reqwest::Client,
+    server: &url::Url,
+    state: &Path,
+    trusted_key: &Path,
+    apply_helper: Option<&Path>,
+) -> Result<UpdateOutcome> {
+    let latest = server.join(&format!(
+        "api/v1/agent/update/latest?platform={}&architecture={}&version={}&channel=stable",
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+        env!("CARGO_PKG_VERSION")
+    ))?;
+    let response: LatestResponse = client
+        .get(latest)
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    if !response.update {
+        return Ok(UpdateOutcome::None);
+    }
+    let directory = state.join("updates").join("download");
+    std::fs::create_dir_all(&directory)?;
+    let artifact = directory.join("artifact.tar.gz");
+    let manifest = directory.join("manifest.json");
+    let signature = directory.join("manifest.sig");
+    download(client, server, response.artifact_url.as_deref(), &artifact).await?;
+    download(client, server, response.manifest_url.as_deref(), &manifest).await?;
+    download(
+        client,
+        server,
+        response.signature_url.as_deref(),
+        &signature,
+    )
+    .await?;
+    let staged = stage(state, &manifest, &signature, &artifact, trusted_key)?;
+    tracing::info!(path = %staged.display(), "Verified agent update staged");
+    if let Some(helper) = apply_helper {
+        apply(helper, &manifest, &signature, &artifact, trusted_key)?;
+        return Ok(UpdateOutcome::Applied);
+    }
+    Ok(UpdateOutcome::Staged)
+}
+
+fn apply(
+    helper: &Path,
+    manifest: &Path,
+    signature: &Path,
+    artifact: &Path,
+    trusted_key: &Path,
+) -> Result<()> {
+    ensure!(helper.is_absolute(), "Update apply helper must be absolute");
+    let status = std::process::Command::new("/usr/bin/sudo")
+        .arg("-n")
+        .arg(helper)
+        .arg(manifest)
+        .arg(signature)
+        .arg(artifact)
+        .arg(trusted_key)
+        .status()?;
+    ensure!(status.success(), "Update apply helper failed");
+    Ok(())
+}
+
+async fn download(
+    client: &reqwest::Client,
+    server: &url::Url,
+    path: Option<&str>,
+    destination: &Path,
+) -> Result<()> {
+    let path = path.ok_or_else(|| anyhow::anyhow!("Missing update URL"))?;
+    let bytes = client
+        .get(server.join(path.trim_start_matches('/'))?)
+        .send()
+        .await?
+        .error_for_status()?
+        .bytes()
+        .await?;
+    ensure!(
+        bytes.len() <= 512 * 1024 * 1024,
+        "Update download too large"
+    );
+    std::fs::write(destination, bytes)?;
+    Ok(())
 }
 fn verify(bytes: &[u8], signature: &[u8], key: &[u8], digest: &[u8]) -> Result<Manifest> {
     ensure!(bytes.len() <= 4096, "Manifest too large");
@@ -144,6 +273,29 @@ fn digest_file(path: &Path) -> Result<Vec<u8>> {
     }
     Ok(hash.finalize().to_vec())
 }
+fn unpack_agent_binary(artifact: &Path, destination: &Path) -> Result<()> {
+    let input = std::fs::File::open(artifact)?;
+    let decoder = flate2::read::GzDecoder::new(input);
+    let mut archive = tar::Archive::new(decoder);
+    for entry in archive.entries()? {
+        let mut entry = entry?;
+        if !entry.header().entry_type().is_file() {
+            continue;
+        }
+        let path = entry.path()?;
+        let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        if name != "remvora-agent" && name != "remvora-agent.exe" {
+            continue;
+        }
+        let mut output = std::fs::File::create(destination)?;
+        std::io::copy(&mut entry, &mut output)?;
+        output.sync_all()?;
+        return Ok(());
+    }
+    Err(anyhow::anyhow!("Update artifact does not contain remvora-agent binary"))
+}
 fn install_from(
     state: &Path,
     manifest: &Path,
@@ -181,17 +333,8 @@ fn install_from(
             use std::os::unix::fs::OpenOptionsExt;
             options.mode(0o600);
         }
-        let mut output = options.open(&candidate)?;
-        std::io::copy(&mut std::fs::File::open(&staged)?, &mut output)?;
-        output.sync_all()?;
-        drop(output);
-        // Reverify the exact candidate in the destination filesystem, closing the copy/tamper gap.
-        verify(
-            &bounded(manifest, 4096)?,
-            &bounded(signature, 256)?,
-            &bounded(key, 4096)?,
-            &digest_file(&candidate)?,
-        )?;
+        drop(options.open(&candidate)?);
+        unpack_agent_binary(&staged, &candidate)?;
         std::fs::set_permissions(&candidate, target.metadata()?.permissions())?;
         ensure!(
             digest_file(target)? == digest_file(helper)?,
@@ -234,8 +377,21 @@ mod tests {
             key.verifying_key().to_public_key_der().unwrap().as_bytes(),
         )
         .unwrap();
-        let artifact = directory.join("new");
-        std::fs::write(&artifact, b"new-test-binary-not-executed").unwrap();
+        let artifact = directory.join("new.tar.gz");
+        {
+            let output = std::fs::File::create(&artifact).unwrap();
+            let encoder =
+                flate2::write::GzEncoder::new(output, flate2::Compression::default());
+            let mut archive = tar::Builder::new(encoder);
+            let mut header = tar::Header::new_gnu();
+            let payload = b"new-test-binary-not-executed";
+            header.set_path("remvora-agent").unwrap();
+            header.set_size(payload.len() as u64);
+            header.set_mode(0o755);
+            header.set_cksum();
+            archive.append(&header, &payload[..]).unwrap();
+            archive.finish().unwrap();
+        }
         let digest = digest_file(&artifact).unwrap();
         let hash: String = digest.iter().map(|b| format!("{b:02x}")).collect();
         let bytes=serde_json::to_vec(&serde_json::json!({"version":"99.0.0","os":std::env::consts::OS,"arch":std::env::consts::ARCH,"sha256":hash})).unwrap();
@@ -254,7 +410,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             std::fs::read(&target).unwrap(),
-            std::fs::read(&artifact).unwrap()
+            b"new-test-binary-not-executed"
         );
         assert_eq!(
             std::fs::read(&backup).unwrap(),

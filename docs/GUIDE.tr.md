@@ -15,7 +15,7 @@ Kaynak derleme için Rust stable (edition 2024) ve native araç zinciri gerekir.
 
 - **Linux/Raspberry Pi:** gerçek CPU mimarisine ve ABI’ye derleyin. CI geliştirme paketleri: clang, libclang-dev, libpipewire-0.3-dev, libxcb1-dev, libxrandr-dev, libxtst-dev, libxkbcommon-dev, libgbm-dev, libdrm-dev, libegl1-mesa-dev, libasound2-dev, libwayland-dev, cmake. Paket adları dağıtıma göre değişebilir. Masaüstü erişilebilir grafik oturumu ister; Wayland compositor/izinleri önemlidir. Ses için `/usr/bin/parec` ve PulseAudio/PipeWire monitor gerekir. Yalnız PTY açık masaüstü istemez, ancak binary’nin bağlı runtime kütüphaneleri yine gerekir.
 - **macOS:** Xcode command-line tools; görüntü/girdi için Screen Recording ve Accessibility izinleri. Sistem sesi Swift/ScreenCaptureKit yardımcısı kullanır (macOS 13+). İlgili oturum açmış kullanıcıda çalıştırın; başsız LaunchDaemon kullanmayın.
-- **Windows:** Visual Studio C++ araçları ve uygun Rust hedefi. Masaüstü etkileşimli oturum ister; Session 0 servisi kullanıcının masaüstünü kontrol etmenin kestirme yolu değildir. Kimlik koruması hesaba bağlı DPAPI’dir. Windows runtime/installer kabulü henüz tamamlanmadı.
+- **Windows:** Yayın MSI'ı `RemvoraAgent` Windows servisini otomatik başlatacak şekilde kurar. Servis oturum açılmasa bile makine seviyesinde API'ye bağlı kalır ve state'i `C:\ProgramData\Remvora\Agent` altında tutar. Masaüstü/girdi özellikleri yine etkileşimli kullanıcı oturumu ister; Session 0 servisi kullanıcının masaüstünü kontrol etmenin kestirme yolu değildir. Kimlik koruması servis hesabına bağlı DPAPI'dir; kayıt ve çalışma aynı servis/state altında yapılmalıdır.
 
 Seçilmiş macOS ARM64 ve Linux ARM64/Raspberry akışları test edildi; tam platform matrisi değil. İmzalı/notarize genel kurulum paketleri henüz sunulmuyor. OS izinlerini cihaz yöneticisi vermelidir; testi geçirmek için OS korumalarını kapatmayın.
 
@@ -93,7 +93,26 @@ journalctl --user -u remvora-agent -n 100
 
 DISPLAY, WAYLAND_DISPLAY, XDG_RUNTIME_DIR ve DBUS doğru olsun diye ilgili grafik hesap/oturumunda çalıştırın. Kurucu mevcut unit’i ezmez; mevcut servisi ayarlarını koruyarak elle inceleyin. Başka kiosk servisini değiştirmeyin. Login öncesi/headless erişim platform tasarımı ister; yalnız linger açmak yeterli değildir. `deploy/remvora-agent.service.example` gözden geçirilerek kullanılacak sistem servisi örneğidir.
 
-macOS: `deploy/com.remvora.agent.plist.example` içindeki binary/state/server yollarını değiştirin; aynı kullanıcıyla kayıt olup LaunchAgent yükleyin ve OS izinlerini verin. Windows: `--service`, SCM `RemvoraAgent` ile bütünleşir; kayıt/DPAPI hesabıyla eşleşen ayrı hesap ve incelenmiş servis argümanları kullanın. Servis modu Session 0 masaüstü sınırını kaldırmaz. Native installer/imza ayrı yayın koşuludur; scripts/şablonları inceleyin.
+macOS: `deploy/com.remvora.agent.plist.example` içindeki binary/state/server yollarını değiştirin; aynı kullanıcıyla kayıt olup LaunchAgent yükleyin ve OS izinlerini verin.
+
+Windows MSI, `SERVERURL` property’si olmadan kurulmaz. En güvenli ilk kurulum yolu, yönetici PowerShell'de ZIP içindeki yardımcı scripti kullanmaktır; script token dosyasını `C:\ProgramData\Remvora\Agent\enrollment-token` konumuna yalnız SYSTEM/Administrators okuyacak şekilde yazar, MSI'ı kurar ve servis başarılı kayıt sonrası token dosyasını siler:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\scripts\install-windows-service.ps1 `
+  -MsiPath .\remvora-agent-0.3.10-x64.msi `
+  -ServerUrl https://api.remvora.example/ `
+  -EnrollmentToken 'PANELDEN_ALINAN_TOKEN' `
+  -AgentArgs '--allow-terminal --allow-reboot'
+```
+
+MSI doğrudan da kurulabilir:
+
+```powershell
+msiexec /i remvora-agent-0.3.10-x64.msi SERVERURL=https://api.remvora.example/ AGENTARGS="--allow-terminal" /qn
+```
+
+`AGENTARGS` boş bırakılırsa servis yalnız bağlantı/kayıt/aktivasyon döngüsünü çalıştırır; terminal, reboot, desktop, pano, dosya ve ses yetenekleri açılmaz. Masaüstü yetenekleri için `--allow-desktop` verilse bile Windows Session 0 sınırı kalkmaz; oturum bazlı helper mimarisi ayrıca gerekir. Servis adı `RemvoraAgent`, state dizini `C:\ProgramData\Remvora\Agent` ve kurulum dizini `Program Files\Remvora` olur.
 
 ## Ağ ve kullanım
 

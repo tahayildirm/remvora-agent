@@ -15,7 +15,7 @@ Rust stable (edition 2024) and native build toolchains are required to build fro
 
 - **Linux / Raspberry Pi:** build for the actual architecture and ABI. Development prerequisites used by CI include clang, libclang-dev, libpipewire-0.3-dev, libxcb1-dev, libxrandr-dev, libxtst-dev, libxkbcommon-dev, libgbm-dev, libdrm-dev, libegl1-mesa-dev, libasound2-dev, libwayland-dev and cmake. Distribution names vary. Desktop needs an active accessible graphical session; Wayland backend permissions/compositor support matter. Linux audio needs `/usr/bin/parec` and a PulseAudio/PipeWire monitor. PTY-only use needs no active desktop but the linked binary still needs its runtime libraries.
 - **macOS:** Xcode command-line tools; Screen Recording and Accessibility permission for desktop/input. Output audio uses a Swift/ScreenCaptureKit helper (macOS 13+). Run in the intended logged-in user session, not a headless LaunchDaemon.
-- **Windows:** Visual Studio C++ build tools and suitable Rust target. Desktop requires an interactive session; a Session 0 service is not a way to control the logged-in desktop. Identity protection uses account-bound DPAPI. Windows runtime/installer acceptance remains incomplete.
+- **Windows:** The release MSI installs and auto-starts the `RemvoraAgent` Windows service. The service stays connected at machine level even before user logon and stores state under `C:\ProgramData\Remvora\Agent`. Desktop/input capabilities still require an interactive user session; a Session 0 service is not a shortcut to controlling the logged-in desktop. Identity protection uses service-account-bound DPAPI, so enrollment and runtime must use the same service/state path.
 
 Selected macOS ARM64 and Linux ARM64/Raspberry flows were exercised, not the entire platform matrix. Signed/notarized public installers are not yet provided. Native OS permission prompts must be handled by the device administrator. Do not disable OS safeguards just to make a test pass.
 
@@ -93,7 +93,26 @@ journalctl --user -u remvora-agent -n 100
 
 Run from the intended graphical account/session so DISPLAY, WAYLAND_DISPLAY, XDG_RUNTIME_DIR and DBUS environment match. The installer refuses to overwrite an existing unit. Review/update existing units manually; do not replace unrelated kiosk services. Boot/start before login and headless capture require platform-specific design, not just enabling linger. `deploy/remvora-agent.service.example` is a system-service template for reviewed use.
 
-macOS: adapt `deploy/com.remvora.agent.plist.example` with actual executable, state and server; enroll under the same user, load as that user’s LaunchAgent and grant OS permissions. Windows: `--service` integrates with SCM `RemvoraAgent`; use a dedicated account with matching enrollment/DPAPI identity and reviewed service arguments. Service mode does not remove Session 0 desktop limits. Native installers/signing are separate release gates; inspect `scripts/` and deployment templates before use.
+macOS: adapt `deploy/com.remvora.agent.plist.example` with actual executable, state and server; enroll under the same user, load as that user’s LaunchAgent and grant OS permissions.
+
+Windows MSI installation requires the `SERVERURL` property. The safest first-install path is the helper script in the ZIP, run from an elevated PowerShell prompt. It writes the one-time enrollment token to `C:\ProgramData\Remvora\Agent\enrollment-token` with SYSTEM/Administrators-only ACLs, installs the MSI, and the service deletes the token file after successful enrollment:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\scripts\install-windows-service.ps1 `
+  -MsiPath .\remvora-agent-0.3.10-x64.msi `
+  -ServerUrl https://api.remvora.example/ `
+  -EnrollmentToken 'TOKEN_FROM_PANEL' `
+  -AgentArgs '--allow-terminal --allow-reboot'
+```
+
+The MSI can also be installed directly:
+
+```powershell
+msiexec /i remvora-agent-0.3.10-x64.msi SERVERURL=https://api.remvora.example/ AGENTARGS="--allow-terminal" /qn
+```
+
+If `AGENTARGS` is empty, the service only runs the connectivity/enrollment/activation loop; terminal, reboot, desktop, clipboard, file and audio capabilities remain disabled. Passing `--allow-desktop` does not remove Windows Session 0 limits; a per-session helper architecture is still required for reliable logged-in desktop control. The service name is `RemvoraAgent`, the state directory is `C:\ProgramData\Remvora\Agent`, and the install directory is `Program Files\Remvora`.
 
 ## Connectivity and operating the device
 

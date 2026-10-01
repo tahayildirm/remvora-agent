@@ -2,13 +2,45 @@
   <Package Name="Remvora Agent" Manufacturer="Remvora" Version="$(var.Version)" UpgradeCode="8E719EFA-EECA-4BE5-B703-10E217DE682D" Scope="perMachine">
     <MajorUpgrade DowngradeErrorMessage="A newer Remvora Agent is already installed." />
     <MediaTemplate EmbedCab="yes" />
+    <Property Id="SERVERURL" Secure="yes" />
+    <Property Id="AGENTARGS" Secure="yes" />
+    <Launch Condition="Installed OR SERVERURL" Message="SERVERURL is required. Install with SERVERURL=https://api.example/." />
     <StandardDirectory Id="ProgramFiles6432Folder">
       <Directory Id="INSTALLFOLDER" Name="Remvora">
         <Component Id="Agent" Guid="*">
           <File Id="AgentExecutable" Source="$(var.AgentBinary)" Name="remvora-agent.exe" KeyPath="yes" />
+          <ServiceInstall
+            Id="RemvoraAgentService"
+            Type="ownProcess"
+            Name="RemvoraAgent"
+            DisplayName="Remvora Agent"
+            Description="Keeps this device connected to Remvora."
+            Start="auto"
+            ErrorControl="normal"
+            Arguments="--service --server &quot;[SERVERURL]&quot; --state &quot;[StateFolder]&quot; [AGENTARGS] run" />
+          <ServiceControl
+            Id="RemvoraAgentServiceControl"
+            Name="RemvoraAgent"
+            Start="install"
+            Stop="both"
+            Remove="uninstall"
+            Wait="yes" />
         </Component>
       </Directory>
     </StandardDirectory>
-    <Feature Id="Main" Title="Remvora Agent" Level="1"><ComponentRef Id="Agent" /></Feature>
+    <StandardDirectory Id="CommonAppDataFolder">
+      <Directory Id="ProgramDataRemvoraFolder" Name="Remvora">
+        <Directory Id="StateFolder" Name="Agent">
+          <Component Id="StateFolderComponent" Guid="*">
+            <CreateFolder />
+            <RegistryValue Root="HKLM" Key="Software\Remvora\Agent" Name="StateFolder" Type="integer" Value="1" KeyPath="yes" />
+          </Component>
+        </Directory>
+      </Directory>
+    </StandardDirectory>
+    <Feature Id="Main" Title="Remvora Agent" Level="1">
+      <ComponentRef Id="Agent" />
+      <ComponentRef Id="StateFolderComponent" />
+    </Feature>
   </Package>
 </Wix>

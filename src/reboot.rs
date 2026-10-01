@@ -15,8 +15,8 @@ fn command() -> Command {
     }
     #[cfg(target_os = "linux")]
     {
-        let mut command = Command::new("/usr/bin/systemctl");
-        command.arg("reboot");
+        let mut command = Command::new("/usr/bin/sudo");
+        command.args(["-n", "/usr/bin/systemctl", "reboot"]);
         command
     }
 }
