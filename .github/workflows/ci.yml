@@ -70,6 +70,7 @@ jobs:
             .artifacts/*.zip.sha256
             .artifacts/*.msi
             .artifacts/*.msi.sha256
+          include-hidden-files: true
           if-no-files-found: error
   audit:
     runs-on: ubuntu-latest
